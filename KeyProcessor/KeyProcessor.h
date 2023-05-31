@@ -54,4 +54,13 @@ cli_screen_cursor_move_cursor_left (int cols, bool remove_char);
 void
 cli_screen_cursor_save_screen_pos (cli_t *cli) ;
 
+void 
+cli_screen_enable_timestamp (cli_t *cli);
+
+void
+cli_debug_print_stats (cli_t *cli) ;
+
+bool
+cli_is_buffer_empty (cli_t *cli);
+
 #endif
