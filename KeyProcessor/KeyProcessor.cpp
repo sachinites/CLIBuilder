@@ -108,6 +108,8 @@ cli_key_processor_cleanup () {
 
     cli_t *cli;
 
+    free(default_cli);
+
     default_cli = NULL;
 
     while ((cli = default_cli_history_list->cli_history_list)) {
@@ -125,12 +127,7 @@ cli_content_reset (cli_t *cli) {
 
 
     cli_t *cli2 = cli ? cli : default_cli;
-#if 1
     memset (&cli2->clibuff[cli2->start_pos], 0, cli2->end_pos - cli2->start_pos);
-#else
-    memset (&cli2->clibuff[cli2->start_pos], 0,
-                (cli2->end_pos != cli2->start_pos) ? cli2->end_pos - cli2->start_pos -1: 0);
-#endif
     cli2->current_pos = cli2->start_pos;
     cli2->end_pos = cli2->start_pos;
     cli2->cnt = cli2->start_pos;
@@ -398,14 +395,12 @@ cli_start_shell () {
                 cli_debug_print_stats(default_cli);
                 break;
             case KEY_RIGHT:
-                cli_screen_cursor_save_screen_pos (default_cli);
-                if (default_cli->col_store == default_cli->end_pos) break;
+                if (default_cli->current_pos == default_cli->end_pos) break;
                 cli_screen_cursor_move_cursor_right(1);
                 default_cli->current_pos++;
                 break;
             case KEY_LEFT:
-                cli_screen_cursor_save_screen_pos (default_cli);
-                if (default_cli->col_store == default_cli->start_pos) break;
+                if (default_cli->current_pos == default_cli->start_pos) break;
                 cli_screen_cursor_move_cursor_left (1, false);
                 default_cli->current_pos--;
                 break;
