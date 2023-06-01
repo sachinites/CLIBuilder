@@ -55,7 +55,7 @@ void
 cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
 
     if (cli_history->count ==  CLI_HISTORY_LIMIT) return;
-    if (new_cli->cnt== 0) return;
+    if (cli_is_buffer_empty (new_cli)) return;
 
     cli_t *cli = (cli_t *)calloc (1, sizeof (cli_t));
     memcpy (cli, new_cli, sizeof (cli_t));
@@ -76,6 +76,7 @@ cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
     cli->next = first_cli;
     first_cli->prev = cli;
     cli_history->cli_history_list = cli;
+    cli_history->count++;
 }
 
 void
@@ -125,19 +126,16 @@ cli_key_processor_cleanup () {
 void
 cli_content_reset (cli_t *cli) {
 
-
-    cli_t *cli2 = cli ? cli : default_cli;
-    memset (&cli2->clibuff[cli2->start_pos], 0, cli2->end_pos - cli2->start_pos);
-    cli2->current_pos = cli2->start_pos;
-    cli2->end_pos = cli2->start_pos;
-    cli2->cnt = cli2->start_pos;
+    memset (&cli->clibuff[cli->start_pos], 0, cli->end_pos - cli->start_pos);
+    cli->current_pos = cli->start_pos;
+    cli->end_pos = cli->start_pos;
+    cli->cnt = cli->start_pos;
 }
 
 void cli_printsc (cli_t *cli, bool next_line) {
 
-    cli_t *cli2 = cli ? cli : default_cli;
     if (next_line) printw ("\n");
-    printw("%s", cli2->clibuff);
+    printw("%s", cli->clibuff);
 }
 
 void
@@ -174,7 +172,7 @@ cli_screen_cursor_move_cursor_left (int cols, bool remove_char) {
     getyx(stdscr, row, col);
     move (row, col - cols);
     if (remove_char) {
-    for (i = 0; i < cols; i++) printw(" ");
+        for (i = 0; i < cols; i++) printw(" ");
         move (row, col - cols);
     }
 }
@@ -191,29 +189,24 @@ cli_screen_cursor_move_cursor_right (int cols) {
 void 
 cli_set_hdr (cli_t *cli, unsigned char *new_hdr, uint8_t size) {
 
-    cli_t *cli2 = cli ? cli : default_cli;
-    memset (cli2, 0, sizeof (cli_t));
-    memcpy (cli2->clibuff , new_hdr, size);
-    cli2->start_pos = size;
-    cli2->current_pos = cli2->start_pos;
-    cli2->end_pos = cli2->start_pos;
-    cli2->cnt = size;
+    memset (cli, 0, sizeof (cli_t));
+    memcpy (cli->clibuff , new_hdr, size);
+    cli->start_pos = size;
+    cli->current_pos = cli->start_pos;
+    cli->end_pos = cli->start_pos;
+    cli->cnt = size;
 }
 
 bool
 cli_cursor_is_at_end_of_line (cli_t *cli) {
 
-    cli_t *cli2 = cli ? cli : default_cli;
-
-    return (cli2->current_pos == cli2->end_pos);
+    return (cli->current_pos == cli->end_pos);
 }
 
 bool
 cli_cursor_is_at_begin_of_line (cli_t *cli) {
 
-    cli_t *cli2 = cli ? cli : default_cli;
-
-    return (cli2->current_pos == cli2->start_pos);
+    return (cli->current_pos == cli->start_pos);
 }
 
 void 
@@ -221,16 +214,14 @@ cli_content_shift_right (cli_t *cli) {
 
     int i;
 
-    cli_t *cli2 = cli ? cli : default_cli;
+   if ( cli->cnt == MAX_COMMAND_LENGTH || cli_is_buffer_empty(cli)) return;
 
-   if ( cli2->cnt == MAX_COMMAND_LENGTH || cli2->cnt == 0) return;
-
-    for (i = cli2->end_pos; i >= cli2->current_pos; i--) {
-        cli2->clibuff[i+1] = cli2->clibuff[i];
+    for (i = cli->end_pos; i >= cli->current_pos; i--) {
+        cli->clibuff[i+1] = cli->clibuff[i];
     }
 
-    cli2->cnt++;
-    cli2->end_pos++;
+    cli->cnt++;
+    cli->end_pos++;
 }
 
 void 
@@ -238,17 +229,15 @@ cli_content_shift_left (cli_t *cli) {
 
     int i;
 
-    cli_t *cli2 = cli ? cli : default_cli;
+   if (cli_is_buffer_empty(cli)) return;
 
-   if (  cli2->cnt == 0) return;
-
-    for (i = cli2->current_pos; i < cli2->end_pos; i++) {
-        cli2->clibuff[i] = cli2->clibuff[i+1];
+    for (i = cli->current_pos; i < cli->end_pos; i++) {
+        cli->clibuff[i] = cli->clibuff[i+1];
     }
 
-    cli2->clibuff[cli2->end_pos -1] = '\0';
-    cli2->cnt--;
-    cli2->end_pos--;
+    cli->clibuff[cli->end_pos -1] = '\0';
+    cli->cnt--;
+    cli->end_pos--;
 }
 
 void
