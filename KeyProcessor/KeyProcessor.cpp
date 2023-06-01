@@ -363,22 +363,22 @@ cli_start_shell () {
                 break;
             case KEY_ASCII_NEWLINE:
             case KEY_ENTER:
-            if (default_cli_history_list->curr_ptr == NULL) {
-                if (!cli_application_process(default_cli)) {
-                    cli_record_copy(default_cli_history_list, default_cli);
+                if (default_cli_history_list->curr_ptr == NULL) {
+                    if (!cli_application_process(default_cli)) {
+                        cli_record_copy(default_cli_history_list, default_cli);
+                    }
+                    cli_content_reset(default_cli);
+                    cli_printsc(default_cli, true);
                 }
-                cli_content_reset (default_cli);
-                cli_printsc (default_cli, true);
-            }
-            else {
-                 cli_application_process(default_cli);
-                 assert(cli_store);
-                 default_cli = cli_store;
-                 cli_store = NULL;
-                 cli_content_reset (default_cli);
-                 cli_printsc (default_cli, true);
-                 default_cli_history_list->curr_ptr = NULL;
-            }
+                else {
+                    cli_application_process(default_cli);
+                    assert(cli_store);
+                    default_cli = cli_store;
+                    cli_store = NULL;
+                    cli_content_reset(default_cli);
+                    cli_printsc(default_cli, true);
+                    default_cli_history_list->curr_ptr = NULL;
+                }
                 break;
             case KEY_ASCII_TAB:
                 cli_debug_print_stats(default_cli);
