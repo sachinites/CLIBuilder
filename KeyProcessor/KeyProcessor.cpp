@@ -10,6 +10,9 @@
 
 #define ctrl(x)           ((x) & 0x1f)
 
+extern int
+cli_cmd_tree_parse_command (unsigned char *command, int size);
+
 typedef struct cli_ {
 
     unsigned char clibuff[MAX_COMMAND_LENGTH];
@@ -33,13 +36,12 @@ typedef struct cli_history_ {
 static cli_t *default_cli = NULL;
 static cli_t *cli_store = NULL;
 static cli_history_t *default_cli_history_list = NULL;
-cli_command_parser_cbk cli_command_parser = NULL;
 
 static int
 cli_application_process (cli_t *cli) {
 
     if (cli_is_buffer_empty (cli)) return -1;
-    return cli_command_parser (&cli->clibuff[cli->start_pos], cli->end_pos - cli->start_pos);
+    return cli_cmd_tree_parse_command (&cli->clibuff[cli->start_pos], cli->end_pos - cli->start_pos);
 }
 
 static bool
@@ -80,11 +82,10 @@ cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
 }
 
 void
-cli_key_processor_init (cli_t **cli, cli_command_parser_cbk command_parser) {
+cli_key_processor_init (cli_t **cli) {
 
     assert(!default_cli);
     assert(!(*cli));
-    assert (!cli_command_parser);
 
     *cli = (cli_t *)calloc (1, sizeof(cli_t));
     default_cli = *cli;
@@ -93,8 +94,6 @@ cli_key_processor_init (cli_t **cli, cli_command_parser_cbk command_parser) {
 
     default_cli_history_list = (cli_history_t *)calloc (1, sizeof (cli_history_t));
     default_cli_history_list->curr_ptr = NULL;
-
-    cli_command_parser = command_parser;
 
     WINDOW *window = initscr();          // Initialize ncurses
     scrollok(window, TRUE);    // Enable scrolling for the window
@@ -279,7 +278,7 @@ cli_start_shell () {
 
     int ch;
     int i;
-    cli_printsc (NULL, true);
+    cli_printsc (default_cli, true);
 
     while (true) {
 
@@ -427,7 +426,7 @@ cli_start_shell () {
                 break;
             default :
                 if ( default_cli->cnt == MAX_COMMAND_LENGTH) break;
-                if (cli_cursor_is_at_end_of_line (NULL)) {
+                if (cli_cursor_is_at_end_of_line (default_cli)) {
                     default_cli->clibuff[default_cli->current_pos++] = (char)ch;
                     default_cli->end_pos++;
                     default_cli->cnt++;
@@ -435,7 +434,7 @@ cli_start_shell () {
                 }
                 else {
                     /* User is typing in the middle OR beginning of the line*/
-                    cli_content_shift_right (NULL);
+                    cli_content_shift_right (default_cli);
                     default_cli->clibuff[default_cli->current_pos++] = (char)ch;
                     cli_screen_cursor_save_screen_pos(default_cli);
                     for (i = default_cli->current_pos -1; i < default_cli->end_pos; i++) {

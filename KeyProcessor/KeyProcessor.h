@@ -6,9 +6,8 @@
 
 typedef struct cli_ cli_t;
 typedef struct cli_history_ cli_history_t;
-typedef int (*cli_command_parser_cbk) (unsigned char *, int);
 
-void cli_key_processor_init (cli_t **, cli_command_parser_cbk) ;
+void cli_key_processor_init (cli_t **) ;
 
 void cli_key_processor_cleanup ();
 
