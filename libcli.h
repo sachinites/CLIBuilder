@@ -1,7 +1,9 @@
 #ifndef __LIBCLI__
 #define __LIBCLI__
 
-#include "CmdParser/CmdTree.h"
+#include "KeyProcessor/KeyProcessor.h"
+#include "CmdTree/CmdTree.h"
+#include "cmdtlv.h"
 
 /*See the definition of this fn to know about arguments*/
 void

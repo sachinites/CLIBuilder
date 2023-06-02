@@ -62,4 +62,7 @@ cli_debug_print_stats (cli_t *cli) ;
 bool
 cli_is_buffer_empty (cli_t *cli);
 
+void
+cli_process_key_interrupt(int ch);
+
 #endif

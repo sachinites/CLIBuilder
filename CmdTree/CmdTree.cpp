@@ -5,21 +5,11 @@
 #include <memory.h>
 #include <assert.h>
 #include "CmdTree.h"
-#include "../stack/stack.h"
-#include "../serializer/serialize.h"
+#include "CmdTreeCursor.h"
 #include "../string_util.h"
 #include "cmdcodes_def.h"
 #include "clistd.h"
-
-typedef struct cmd_ctx_ {
-
-    Stack_t *stack;
-    ser_buff_t *tlv_buffer;
-    param_t *cursor;
-} cmd_ctx_t;
-
-static cmd_ctx_t ctx;
-static cmd_ctx_t nexted_ctx;
+#include "../cmdtlv.h"
 
 /*Default zero level commands hooks. */
 static param_t root;
@@ -28,9 +18,6 @@ static param_t debug;
 static param_t config;
 static param_t clearp;
 static param_t run;
-
-#define MIN(a,b)    (a < b ? a : b)
-
 
 void
 init_param(param_t *param,    
@@ -100,12 +87,13 @@ init_param(param_t *param,
     param->CMDCODE = -1;
 }
 
+
 void 
 libcli_register_param(param_t *parent, param_t *child) {
 
     int i = 0;
 
-    if (!parent) parent = libcli_get_root();
+    if (!parent) parent = libcli_get_root_hook();
 
     for (i = CHILDREN_START_INDEX; i <= CHILDREN_END_INDEX; i++) {
         if (parent->options[i])
@@ -124,19 +112,32 @@ set_param_cmd_code(param_t *param, int cmd_code) {
     param->CMDCODE = cmd_code;
 }
 
-
 static void 
  libcli_build_default_cmdtree() {
 
-    param_t *root_hook = libcli_get_root();
+    param_t *root_hook = libcli_get_root_hook();
+    init_param(root_hook, CMD, "ROOT", 0, 0, INVALID, 0, "ROOT");
 
-    libcli_register_param (root_hook, libcli_get_show_hook());
-    libcli_register_param (root_hook, libcli_get_config_hook());
-    libcli_register_param (root_hook, libcli_get_debug_hook());
-    libcli_register_param (root_hook, libcli_get_clear_hook());
-    libcli_register_param (root_hook, libcli_get_run_hook());
+    param_t *chook = libcli_get_show_hook();
+    init_param(chook, CMD, "show", 0, 0, INVALID, 0, "show cmds");
+    libcli_register_param (root_hook, chook);
 
-   
+    chook = libcli_get_config_hook();
+    init_param(chook, CMD, "config", NULL, 0, INVALID, 0, "config cmds");
+    libcli_register_param (root_hook, chook);
+
+    chook = libcli_get_debug_hook();
+    init_param(chook, CMD, "debug", 0, 0, INVALID, 0, "debug cmds");
+    libcli_register_param (root_hook, chook);
+
+    chook = libcli_get_clear_hook();
+    init_param(chook, CMD, "clear", 0, 0, INVALID, 0, "clear cmds");
+    libcli_register_param (root_hook, chook);
+
+    chook = libcli_get_run_hook();
+    init_param(chook, CMD, "run", 0, 0, INVALID, 0, "run cmds");
+    libcli_register_param (root_hook, chook);
+
     param_t *config_hook = libcli_get_config_hook();
 
     {
@@ -155,25 +156,18 @@ static void
     }
  }
 
-
-static void 
+void 
 cmd_tree_init () {
 
-    static bool initialized = false; 
-
-    if (initialized) return;
-
-    ctx.stack = get_new_stack ();
     init_token_array();
-    init_serialized_buffer (&ctx.tlv_buffer);
-    ctx.cursor = libcli_get_root();
     libcli_build_default_cmdtree();
+    cmd_tree_default_cursor_init () ;
 }
 
 /* Function to be used to get access to above hooks*/
 
 param_t *
-libcli_get_root(void)
+libcli_get_root_hook(void)
 {
     return &root;
 }
@@ -208,33 +202,34 @@ libcli_get_run_hook(void)
     return &run;
 }
 
+bool
+cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char c, int index) {
 
-
-static cmd_tree_parse_res_t 
-cmd_tree_parse_command_internal (char **tokens, int token_count) {
-
-    cmd_tree_parse_res_t rc = cmd_tree_parse_app_accepted;
-
-    return rc;
+    assert (IS_PARAM_LEAF (leaf_param));
+    if (index == LEAF_VALUE_HOLDER_SIZE) return false;
+    GET_LEAF_VALUE_PTR(leaf_param)[index] = c;
+    return true;
 }
 
-cmd_tree_parse_res_t
-cmd_tree_parse_command (unsigned char *command, int size) {
 
-    char** tokens = NULL;
-    int token_count = 0;
+void 
+cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff) {
 
-    cmd_tree_parse_res_t rc = cmd_tree_parse_app_accepted;
-    
-    cmd_tree_init () ;
+     tlv_struct_t tlv;
 
-    re_init_tokens (MAX_CMD_TREE_DEPTH);
+     memset(&tlv, 0, sizeof(tlv_struct_t));
 
-    tokens = tokenizer(command, ' ', &token_count);
+    if (IS_PARAM_CMD (param)) {
+        
+        tlv.tlv_type = TLV_TYPE_CMD_NAME;
+        tlv.leaf_type = STRING;
+        put_value_in_tlv((&tlv), GET_CMD_NAME(param));
+        collect_tlv(ser_buff, &tlv);
+    }
+    else {
 
-    if (!token_count) return cmd_tree_parse_invalid_cmd;
-
-    rc = cmd_tree_parse_command_internal (tokens, token_count);
-
-    return rc;
+        prepare_tlv_from_leaf(GET_PARAM_LEAF(param), (&tlv));
+        put_value_in_tlv((&tlv), GET_LEAF_VALUE_PTR(param));
+        collect_tlv(ser_buff, &tlv);
+    }
 }

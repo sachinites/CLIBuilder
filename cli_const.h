@@ -14,7 +14,7 @@
 #define MAX_CMD_TREE_DEPTH 16
 #define CHILDREN_START_INDEX    0
 #define CHILDREN_END_INDEX      (MAX_OPTION_SIZE -1)
-
+#define TLV_MAX_BUFFER_SIZE     1024
 
 
 
@@ -73,5 +73,11 @@ typedef enum{
     VALIDATION_FAILED = -1, 
     VALIDATION_SUCCESS
 } CLI_VAL_RC;
+
+
+/* Reserved TLV Types */
+#define TLV_TYPE_NORMAL    0           /* Normal TLVs which store user CLI values */
+#define TLV_TYPE_CMD_NAME    255  /* TLVs which store CMD params name*/
+#define TLV_TYPE_NEGATE    254          /* 'no' keyword */
 
 #endif 

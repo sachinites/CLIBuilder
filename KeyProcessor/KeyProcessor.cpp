@@ -7,11 +7,11 @@
 
 #include "../cli_const.h"
 #include "KeyProcessor.h"
+#include "CmdTree/CmdTree.h"
+#include "CmdTree/CmdTreeCursor.h"
+
 
 #define ctrl(x)           ((x) & 0x1f)
-
-extern int
-cli_cmd_tree_parse_command (unsigned char *command, int size);
 
 typedef struct cli_ {
 
@@ -22,6 +22,7 @@ typedef struct cli_ {
     int cnt;
     int row_store;
     int col_store;
+    cmd_tree_cursor_t *cmdtc;
     struct cli_ *next;
     struct cli_ *prev;
 } cli_t;
@@ -29,7 +30,7 @@ typedef struct cli_ {
 typedef struct cli_history_ {
 
     cli_t *cli_history_list;
-    int count;
+    int count;  
     cli_t *curr_ptr;
 } cli_history_t;
 
@@ -41,7 +42,7 @@ static int
 cli_application_process (cli_t *cli) {
 
     if (cli_is_buffer_empty (cli)) return -1;
-    return cli_cmd_tree_parse_command (&cli->clibuff[cli->start_pos], cli->end_pos - cli->start_pos);
+    return 0;
 }
 
 static bool
@@ -61,7 +62,7 @@ cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
 
     cli_t *cli = (cli_t *)calloc (1, sizeof (cli_t));
     memcpy (cli, new_cli, sizeof (cli_t));
-
+    cli->cmdtc = NULL;
     if (cli_history->cli_history_list == NULL) {
         cli_history->cli_history_list = cli;
         cli_history->count++;
@@ -91,7 +92,8 @@ cli_key_processor_init (cli_t **cli) {
     default_cli = *cli;
 
     cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, (uint8_t) strlen (DEF_CLI_HDR));
-
+    cmd_tree_cursor_init (&default_cli->cmdtc, default_cli);
+    cmd_tree_init ();
     default_cli_history_list = (cli_history_t *)calloc (1, sizeof (cli_history_t));
     default_cli_history_list->curr_ptr = NULL;
 
@@ -108,6 +110,8 @@ cli_key_processor_cleanup () {
 
     cli_t *cli;
 
+    cmd_tree_cursor_reset (default_cli->cmdtc);
+    free(default_cli->cmdtc);
     free(default_cli);
 
     default_cli = NULL;
@@ -115,6 +119,7 @@ cli_key_processor_cleanup () {
     while ((cli = default_cli_history_list->cli_history_list)) {
 
         default_cli_history_list->cli_history_list = cli->next;
+        assert(!cli->cmdtc);
         free(cli);
     }
     free( default_cli_history_list);
@@ -133,7 +138,7 @@ cli_content_reset (cli_t *cli) {
 
 void cli_printsc (cli_t *cli, bool next_line) {
 
-    if (next_line) printw ("\n");
+    if (next_line) cli_screen_cursor_move_next_line ();
     printw("%s", cli->clibuff);
 }
 
@@ -270,180 +275,275 @@ cli_screen_enable_timestamp (cli_t *cli) {
 
 }
 
+void
+cli_process_key_interrupt(int ch)
+{
+    int i;
+    cmdt_cursor_op_res_t rc;
 
-/// @brief  Fn to parse the user terminal input
+    switch (ch)
+    {
+    case ctrl('n'):
+        if (cli_cursor_is_at_end_of_line(default_cli))
+            break;
+        cli_screen_cursor_save_screen_pos(default_cli);
+        for (i = default_cli->current_pos; i <= default_cli->end_pos; i++)
+        {
+            default_cli->clibuff[i] = '\0';
+            printw(" ");
+        }
+        default_cli->cnt -= default_cli->end_pos - default_cli->current_pos;
+        default_cli->end_pos = default_cli->current_pos;
+        move(default_cli->row_store, default_cli->col_store);
+        break;
+    case ctrl('w'):
+        /* ToDo : Delete the current Word */
+        break;
+    case ctrl('l'):
+        clear();
+        cli_printsc(default_cli, true);
+        break;
+    case KEY_HOME: /* Inbuilt , provided by ncurses */
+        if (cli_cursor_is_at_begin_of_line(default_cli))
+            break;
+        cli_screen_cursor_move_cursor_left(
+            default_cli->current_pos - default_cli->start_pos, false);
+        default_cli->current_pos = default_cli->start_pos;
+        break;
+    case KEY_END:
+        cli_screen_cursor_move_cursor_right(default_cli->end_pos - default_cli->current_pos);
+        default_cli->current_pos = default_cli->end_pos;
+        break;
+    case KEY_BACKSPACE:
+        /* Case 1 : if we are at the beginning of line */
+        if (default_cli->current_pos == default_cli->start_pos)
+            break;
+
+        /* Case 2 : if we are at the end of line*/
+        else if (default_cli->current_pos == default_cli->end_pos)
+        {
+            default_cli->current_pos--;
+            default_cli->end_pos--;
+            default_cli->cnt--;
+            default_cli->clibuff[default_cli->current_pos] = '\0';
+            cli_screen_cursor_move_cursor_left(1, true);
+        }
+
+        /* Case 3 : we are in the middle of the line */
+        else
+        {
+            default_cli->current_pos--;
+            cli_content_shift_left(default_cli);
+            cli_screen_cursor_move_cursor_left(1, true);
+            cli_screen_cursor_save_screen_pos(default_cli);
+            for (i = default_cli->current_pos; i < default_cli->end_pos; i++)
+            {
+                printw("%c", default_cli->clibuff[i]);
+            }
+            printw(" ");
+            move(default_cli->row_store, default_cli->col_store);
+            default_cli->current_pos = default_cli->col_store;
+        }
+        break;
+    case KEY_DC: /* delete key is pressed */
+        /* Case 1 : if we are at the beginning or middle of the line */
+        if (default_cli->current_pos != default_cli->end_pos)
+        {
+
+            cli_content_shift_left(default_cli);
+            cli_screen_cursor_save_screen_pos(default_cli);
+            for (i = default_cli->current_pos; i < default_cli->end_pos; i++)
+            {
+                printw("%c", default_cli->clibuff[i]);
+            }
+            printw(" ");
+            move(default_cli->row_store, default_cli->col_store);
+            default_cli->current_pos = default_cli->col_store;
+        }
+
+        /* Case 2 : if we are at the end of line*/
+        else if (default_cli->current_pos == default_cli->end_pos)
+        {
+            break;
+        }
+        break;
+    case KEY_ASCII_NEWLINE:
+    case KEY_ENTER:
+        cli_screen_cursor_save_screen_pos(default_cli);
+        move(default_cli->row_store, default_cli->end_pos);
+        if (default_cli_history_list->curr_ptr == NULL)
+        {
+            if (!cli_application_process(default_cli))
+            {
+                cli_record_copy(default_cli_history_list, default_cli);
+            }
+            cli_content_reset(default_cli);
+            cli_printsc(default_cli, true);
+        }
+        else
+        {
+            cli_application_process(default_cli);
+            assert(cli_store);
+            default_cli = cli_store;
+            cli_store = NULL;
+            cli_content_reset(default_cli);
+            cli_printsc(default_cli, true);
+            default_cli_history_list->curr_ptr = NULL;
+        }
+        break;
+    case KEY_ASCII_TAB:
+        cli_debug_print_stats(default_cli);
+        break;
+    case KEY_RIGHT:
+        if (default_cli->current_pos == default_cli->end_pos)
+            break;
+        cli_screen_cursor_move_cursor_right(1);
+        default_cli->current_pos++;
+        break;
+    case KEY_LEFT:
+        if (default_cli->current_pos == default_cli->start_pos)
+            break;
+        cli_screen_cursor_move_cursor_left(1, false);
+        default_cli->current_pos--;
+        break;
+    case KEY_UP:
+        cli_screen_cursor_save_screen_pos(default_cli);
+        if (default_cli_history_list->curr_ptr == NULL)
+        {
+            default_cli_history_list->curr_ptr = default_cli_history_list->cli_history_list;
+        }
+        else
+        {
+            default_cli_history_list->curr_ptr =
+                default_cli_history_list->curr_ptr->next;
+        }
+        if (default_cli_history_list->curr_ptr == NULL)
+            break;
+        deleteln();
+        move(default_cli->row_store, 0);
+        cli_printsc(default_cli_history_list->curr_ptr, false);
+        if (!cli_store)
+            cli_store = default_cli;
+        default_cli = default_cli_history_list->curr_ptr;
+        break;
+    case KEY_DOWN:
+        cli_screen_cursor_save_screen_pos(default_cli);
+        if (default_cli_history_list->curr_ptr == NULL)
+        {
+            break;
+        }
+        else
+        {
+            default_cli_history_list->curr_ptr =
+                default_cli_history_list->curr_ptr->prev;
+        }
+        if (default_cli_history_list->curr_ptr == NULL)
+            break;
+        deleteln();
+        move(default_cli->row_store, 0);
+        cli_printsc(default_cli_history_list->curr_ptr, false);
+        if (!cli_store)
+            cli_store = default_cli;
+        default_cli = default_cli_history_list->curr_ptr;
+        break;
+    case ' ':
+        rc = cmdt_cursor_parse_next_char(default_cli->cmdtc, ch);
+        switch (rc) {
+            case cmdt_cursor_ok:
+                /* print the blank character, take care that we might be typing not in the end*/
+                /* This code will be returned when the user has pressed ' ' after typing out the
+                    value of a leaf in cli*/
+                   if (cli_cursor_is_at_end_of_line(default_cli)) {
+                        default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                        default_cli->end_pos++;
+                        default_cli->cnt++;
+                        printw(" ");
+                   }
+                   else {
+                        cli_content_shift_right(default_cli);
+                        default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                        cli_screen_cursor_save_screen_pos(default_cli);
+                        for (i = default_cli->current_pos - 1; i < default_cli->end_pos; i++) {
+                            printw("%c", default_cli->clibuff[i]);
+                        }
+                        move(default_cli->row_store, default_cli->current_pos);
+                   }
+                break;
+            case cmdt_cursor_done_auto_completion:
+                /* print the blank character, take care that we might be typing not in the end*/
+                    if (cli_cursor_is_at_end_of_line(default_cli)) {
+                        default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                        default_cli->end_pos++;
+                        default_cli->cnt++;
+                        printw(" ");
+                   }
+                   else {
+                        cli_content_shift_right(default_cli);
+                        default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                        cli_screen_cursor_save_screen_pos(default_cli);
+                        for (i = default_cli->current_pos - 1; i < default_cli->end_pos; i++) {
+                            printw("%c", default_cli->clibuff[i]);
+                        }
+                        move(default_cli->row_store, default_cli->current_pos);
+                   }
+                break;
+                break;
+            case cmdt_cursor_no_match_further:
+                break;
+        }
+        break;
+    default:
+        if (default_cli->cnt == MAX_COMMAND_LENGTH)
+            break;
+        if (cli_cursor_is_at_end_of_line(default_cli))
+        {
+            rc = cmdt_cursor_parse_next_char(default_cli->cmdtc, ch);
+            switch (rc)
+            {
+            case cmdt_cursor_ok:
+                default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                default_cli->end_pos++;
+                default_cli->cnt++;
+                printw("%c", ch);
+                break;
+            case cmdt_cursor_no_match_further:
+                break;
+            }
+        }
+        else
+        {
+            /* User is typing in the middle OR beginning of the line*/
+            rc = cmdt_cursor_parse_next_char(default_cli->cmdtc, ch);
+            switch (rc)
+            {
+            case cmdt_cursor_ok:
+                cli_content_shift_right(default_cli);
+                default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                cli_screen_cursor_save_screen_pos(default_cli);
+                for (i = default_cli->current_pos - 1; i < default_cli->end_pos; i++)
+                {
+                    printw("%c", default_cli->clibuff[i]);
+                }
+                move(default_cli->row_store, default_cli->current_pos);
+                break;
+            case cmdt_cursor_no_match_further:
+                break;
+            }
+        }
+        break;
+    }
+}
 
 void 
 cli_start_shell () {
 
-    int ch;
-    int i;
+    int ch;  
+
     cli_printsc (default_cli, true);
 
     while (true) {
-
         ch = getch();
-
-         switch (ch) {
-            case ctrl('n'):
-                if (cli_cursor_is_at_end_of_line (default_cli)) break;
-                cli_screen_cursor_save_screen_pos (default_cli);
-                for (i = default_cli->current_pos; i <= default_cli->end_pos; i++) {
-                    default_cli->clibuff[i] = '\0';
-                    printw(" ");
-                }
-                default_cli->cnt -= default_cli->end_pos - default_cli->current_pos;
-                default_cli->end_pos = default_cli->current_pos;
-                move (default_cli->row_store, default_cli->col_store);
-                break;
-            case ctrl('w'):
-                /* ToDo : Delete the current Word */
-                break;
-            case ctrl('l'):
-                clear();
-                cli_printsc (default_cli, true);
-                break;
-            case KEY_HOME: /* Inbuilt , provided by ncurses */
-                if (cli_cursor_is_at_begin_of_line(default_cli)) break;
-                cli_screen_cursor_move_cursor_left (
-                        default_cli->current_pos - default_cli->start_pos, false);
-                default_cli->current_pos = default_cli->start_pos;
-                break;
-            case KEY_END:
-                cli_screen_cursor_move_cursor_right 
-                    (default_cli->end_pos - default_cli->current_pos);
-                default_cli->current_pos = default_cli->end_pos;
-                break;
-            case KEY_BACKSPACE:
-                /* Case 1 : if we are at the beginning of line */
-                if (default_cli->current_pos == default_cli->start_pos) break;
-
-                /* Case 2 : if we are at the end of line*/
-                else if (default_cli->current_pos == default_cli->end_pos) {
-                    default_cli->current_pos--;
-                    default_cli->end_pos--;
-                    default_cli->cnt--;
-                    default_cli->clibuff[default_cli->current_pos]= '\0';
-                    cli_screen_cursor_move_cursor_left (1, true);
-                }
-
-                /* Case 3 : we are in the middle of the line */
-                else {
-                    default_cli->current_pos--;
-                    cli_content_shift_left (default_cli);
-                    cli_screen_cursor_move_cursor_left(1, true);
-                    cli_screen_cursor_save_screen_pos(default_cli);
-                    for (i = default_cli->current_pos; i < default_cli->end_pos; i++) {
-                        printw ("%c", default_cli->clibuff[i]);
-                    }
-                    printw(" ");
-                    move (default_cli->row_store, default_cli->col_store);
-                    default_cli->current_pos = default_cli->col_store;
-                }
-                break;
-            case KEY_DC: /* delete key is pressed */
-                /* Case 1 : if we are at the beginning or middle of the line */
-                if (default_cli->current_pos != default_cli->end_pos) {
-                    
-                    cli_content_shift_left (default_cli);
-                    cli_screen_cursor_save_screen_pos(default_cli);
-                    for (i = default_cli->current_pos; i < default_cli->end_pos; i++) {
-                        printw ("%c", default_cli->clibuff[i]);
-                    }
-                    printw(" ");
-                    move (default_cli->row_store, default_cli->col_store);
-                    default_cli->current_pos = default_cli->col_store;
-                }
-
-                /* Case 2 : if we are at the end of line*/
-                else if (default_cli->current_pos == default_cli->end_pos) {
-                    break;
-                }
-                break;
-            case KEY_ASCII_NEWLINE:
-            case KEY_ENTER:
-                if (default_cli_history_list->curr_ptr == NULL) {
-                    if (!cli_application_process(default_cli)) {
-                        cli_record_copy(default_cli_history_list, default_cli);
-                    }
-                    cli_content_reset(default_cli);
-                    cli_printsc(default_cli, true);
-                }
-                else {
-                    cli_application_process(default_cli);
-                    assert(cli_store);
-                    default_cli = cli_store;
-                    cli_store = NULL;
-                    cli_content_reset(default_cli);
-                    cli_printsc(default_cli, true);
-                    default_cli_history_list->curr_ptr = NULL;
-                }
-                break;
-            case KEY_ASCII_TAB:
-                cli_debug_print_stats(default_cli);
-                break;
-            case KEY_RIGHT:
-                if (default_cli->current_pos == default_cli->end_pos) break;
-                cli_screen_cursor_move_cursor_right(1);
-                default_cli->current_pos++;
-                break;
-            case KEY_LEFT:
-                if (default_cli->current_pos == default_cli->start_pos) break;
-                cli_screen_cursor_move_cursor_left (1, false);
-                default_cli->current_pos--;
-                break;
-            case KEY_UP:
-                cli_screen_cursor_save_screen_pos (default_cli);
-                if (default_cli_history_list->curr_ptr == NULL) {
-                    default_cli_history_list->curr_ptr = default_cli_history_list->cli_history_list;
-                }
-                else {
-                    default_cli_history_list->curr_ptr =
-                        default_cli_history_list->curr_ptr->next;
-                }
-                 if (default_cli_history_list->curr_ptr == NULL) break;
-                 deleteln();
-                 move (default_cli->row_store, 0);
-                 cli_printsc (default_cli_history_list->curr_ptr, false);
-                 if (!cli_store) cli_store = default_cli;
-                 default_cli = default_cli_history_list->curr_ptr;
-                break;
-            case KEY_DOWN:
-                cli_screen_cursor_save_screen_pos (default_cli);
-                if (default_cli_history_list->curr_ptr == NULL) {
-                    break;
-                }
-                else {
-                    default_cli_history_list->curr_ptr =
-                        default_cli_history_list->curr_ptr->prev;
-                }
-                 if (default_cli_history_list->curr_ptr == NULL) break;
-                 deleteln();
-                 move (default_cli->row_store, 0);
-                 cli_printsc (default_cli_history_list->curr_ptr, false);
-                 if (!cli_store) cli_store = default_cli;
-                 default_cli = default_cli_history_list->curr_ptr;
-                break;
-            default :
-                if ( default_cli->cnt == MAX_COMMAND_LENGTH) break;
-                if (cli_cursor_is_at_end_of_line (default_cli)) {
-                    default_cli->clibuff[default_cli->current_pos++] = (char)ch;
-                    default_cli->end_pos++;
-                    default_cli->cnt++;
-                    printw("%c", ch);
-                }
-                else {
-                    /* User is typing in the middle OR beginning of the line*/
-                    cli_content_shift_right (default_cli);
-                    default_cli->clibuff[default_cli->current_pos++] = (char)ch;
-                    cli_screen_cursor_save_screen_pos(default_cli);
-                    for (i = default_cli->current_pos -1; i < default_cli->end_pos; i++) {
-                        printw("%c", default_cli->clibuff[i]);
-                    }
-                    move(default_cli->row_store, default_cli->current_pos);
-                }
-                break;
-        }
+        cli_process_key_interrupt ((int)ch);
     }
 
    cli_key_processor_cleanup () ;

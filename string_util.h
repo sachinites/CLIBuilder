@@ -21,7 +21,9 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <ncurses.h>
 
+#define MIN(a,b)    (a < b ? a : b)
 
 char** tokenizer(unsigned char* a_str, 
                  const char a_delim, 
@@ -58,5 +60,12 @@ grep (char string[], int string_size, char pattern[]);
 
 uint64_t
 string_fetch_integer(char *string, int string_size, int index);
+
+#define PRINT_TABS(n)     \
+do{                       \
+   unsigned short _i = 0; \
+   for(; _i < n; _i++)    \
+       printw("  ");      \
+} while(0);
 
 #endif

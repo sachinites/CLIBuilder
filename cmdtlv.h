@@ -28,7 +28,7 @@
 #include <ncurses.h>
 #include "serializer/serialize.h"
 #include "cli_const.h"
-
+#include "string_util.h"
 
 #pragma pack (push,1)
 typedef struct tlv_struct{
@@ -72,7 +72,7 @@ typedef struct tlv_struct{
 #define put_value_in_tlv(tlvptr, _val)         \
 	{										   \
 		const char *temp = _val;			   \
-		memcpy(tlvptr->value, temp, MIN(LEAF_VALUE_HOLDER_SIZE, strlen(temp)));	\
+		strncpy((char *)tlvptr->value, temp, LEAF_VALUE_HOLDER_SIZE);	\
 	}
 
 static inline void 

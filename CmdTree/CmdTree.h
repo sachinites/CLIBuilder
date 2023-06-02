@@ -1,10 +1,13 @@
 #ifndef __CMDTREE__
 #define __CMDTREE__
 
+#include <stdbool.h>
 #include "../cli_const.h"
+#include "../gluethread/glthread.h"
 
-typedef struct serialized_buffer ser_buff_t;
 typedef struct _param_t_ param_t;
+typedef struct serialized_buffer ser_buff_t;
+
 
 typedef int (*user_validation_callback)(ser_buff_t *, unsigned char *leaf_value);
 typedef void (*display_possible_values_callback)(param_t *, ser_buff_t *);
@@ -41,7 +44,9 @@ struct _param_t_{
     struct _param_t_ *options[MAX_OPTION_SIZE];
     display_possible_values_callback disp_callback;
     int CMDCODE;
+    glthread_t glue;
 };
+GLTHREAD_TO_STRUCT (glue_to_param, param_t, glue);
 
 typedef CLI_VAL_RC (*leaf_type_handler)(leaf_t *leaf, char *value_passed);
 
@@ -57,19 +62,13 @@ typedef CLI_VAL_RC (*leaf_type_handler)(leaf_t *leaf, char *value_passed);
 #define GET_PARAM_HELP_STRING(param) (param->help)
 #define GET_LEAF_ID(param)          (GET_PARAM_LEAF(param)->leaf_id)
 
-typedef enum cmd_tree_parse_res_ {
-
-    cmd_tree_parse_app_accepted,       /* cmd is accepted to be processed by application*/
-    cmd_tree_parse_app_rejected,        /* cmd valid but is rejected by the application*/
-    cmd_tree_parse_incomplete_cmd,  /* parser could not parse the cmd to completion */
-    cmd_tree_parse_invalid_cmd          /* parser could not parse the command to come to any conclusion*/
-} cmd_tree_parse_res_t;
-
+void 
+cmd_tree_init ();
 
 /* Function to be used to get access to above hooks*/
 
 param_t *
-libcli_get_root(void);
+libcli_get_root_hook(void);
 
 param_t *
 libcli_get_show_hook(void);
@@ -86,7 +85,10 @@ libcli_get_clear_hook(void);
 param_t *
 libcli_get_run_hook(void);
 
-cmd_tree_parse_res_t
-cmd_tree_parse_command (unsigned char *command, int size) ;
+bool
+cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char, int index);
+
+void 
+cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff);
 
 #endif 
