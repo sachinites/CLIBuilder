@@ -23,7 +23,7 @@ void
 cmd_tree_default_cursor_init () ;
 
 cmd_tree_cursor_t *
-cmf_tree_get_default_cursor ();
+cmd_tree_get_default_cursor ();
 
 void 
 cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) ;

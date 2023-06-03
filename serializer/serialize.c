@@ -69,7 +69,7 @@ serialize_buffer_skip(ser_buff_t *b, int size){
 }
 
 void 
-restore_checkpoint_serialize_buffer(ser_buff_t *b){
+serialize_buffer_restore_checkpoint(ser_buff_t *b){
     
     if(!b) assert(0);
     b->next = b->checkpoint;

@@ -44,7 +44,7 @@ void free_serialize_buffer(ser_buff_t *b);
 /*reset function*/
 void truncate_serialize_buffer(ser_buff_t **b);
 void reset_serialize_buffer(ser_buff_t *b);
-void restore_checkpoint_serialize_buffer(ser_buff_t *b);
+void serialize_buffer_restore_checkpoint(ser_buff_t *b);
 int serialize_buffer_get_checkpoint_offset(ser_buff_t *b);
 void serialize_buffer_mark_checkpoint(ser_buff_t *b);
 /* Details*/

@@ -58,11 +58,10 @@ cmd_tree_default_cursor_init () {
 }
 
 cmd_tree_cursor_t *
-cmf_tree_get_default_cursor () {
+cmd_tree_get_default_cursor () {
 
     return default_cmdtc;
 }
-
 
 void 
 cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
@@ -556,6 +555,33 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     cli_printsc (cli, true);
 }
 
+/* This fn resets the cmd tree cursor back to pavilion to be
+    ready to process next command*/
+static void 
+cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
+
+    /* Its Optional to reset the stack since it is checkpointed.
+        But i choose to reset the stack to ease debugging in gdb*/
+    assert(cmdtc->stack->top >= cmdtc->stack_checkpoint);
+    while (cmdtc->stack->top > cmdtc->stack_checkpoint) pop(cmdtc->stack);
+
+    /* It is optional to reset the serialized TLV buffer for the same reason.
+        But let me choose to cleanit up as a good practice.*/
+    serialize_buffer_restore_checkpoint(cmdtc->tlv_buffer);
+
+    /* Set back the curr_param to start of the root of the tree. Root of the
+        tree could be actual 'root' param, or some other param in tree if
+        user is operating in mode */
+    cmdtc->curr_param = cmdtc->root;
+
+    assert (!cmdtc->icursor);
+
+    cmdtc->cmdtc_state= cmdt_cur_state_init;
+
+    while ((dequeue_glthread_first (&cmdtc->matching_params_list)));
+    cmdtc->leaf_param = NULL;
+}
+
 static void 
 cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
 
@@ -563,6 +589,13 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
     int count = 1;
     param_t *param;
     op_mode enable_or_diable;
+
+    /* Do not trigger the CLI if the user has not typed CLI to the
+        completion*/
+    if (!cmdtc->curr_param->callback) {
+        printw("\nError : Incomplete CLI...");
+        return;
+    }
 
     int tlv_buffer_original_size = tlv_buffer_get_size (cmdtc->tlv_buffer);
     int tlv_buffer_checkpoint_offset = serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer);
@@ -607,18 +640,33 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
     switch (cmdtc->cmdtc_state) {
         
         case cmdt_cur_state_init:
-            /* Fire the CLI*/
+            /*User has typed the complete current word, fir the CLI if last word
+                has appln callback, thenFire the CLI*/
             cmd_tree_trigger_cli (cmdtc);
+            cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         case cmdt_cur_state_multiple_matches:
+            cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         case cmdt_cur_state_single_word_match:
-            /* Auto complete the word , push into the stack and fire the CLI*/
+            /* Auto complete the word , push into the stack and TLV buffer and fire the CLI*/
+            /* only one option is matching and that is fixed word , do auto-completion*/
+            while (GET_CMD_NAME(cmdtc->curr_param)[cmdtc->icursor] != '\0') {
+                cli_process_key_interrupt (
+                        (int)GET_CMD_NAME(cmdtc->curr_param)[cmdtc->icursor]);
+            }
+            cmd_tree_cursor_move_to_next_level (cmdtc);
+            cmd_tree_trigger_cli (cmdtc);
+            cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         case cmdt_cur_state_matching_leaf:
             /* Push it into the stack and Fire the CLI*/
+            cmd_tree_cursor_move_to_next_level (cmdtc);
+            cmd_tree_trigger_cli (cmdtc);
+            cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         case cmdt_cur_state_no_match:
+            cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         default: ;
     }
