@@ -92,7 +92,7 @@ cli_key_processor_init (cli_t **cli) {
     default_cli = *cli;
 
     cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, (uint8_t) strlen (DEF_CLI_HDR));
-    cmd_tree_cursor_init (&default_cli->cmdtc, default_cli);
+    cmd_tree_cursor_init (&default_cli->cmdtc);
     cmd_tree_init ();
     default_cli_history_list = (cli_history_t *)calloc (1, sizeof (cli_history_t));
     default_cli_history_list->curr_ptr = NULL;
@@ -110,7 +110,7 @@ cli_key_processor_cleanup () {
 
     cli_t *cli;
 
-    cmd_tree_cursor_reset (default_cli->cmdtc);
+    cmd_tree_cursor_deinit (default_cli->cmdtc);
     free(default_cli->cmdtc);
     free(default_cli);
 
@@ -134,6 +134,24 @@ cli_content_reset (cli_t *cli) {
     cli->current_pos = cli->start_pos;
     cli->end_pos = cli->start_pos;
     cli->cnt = cli->start_pos;
+}
+
+void 
+cli_complete_reset (cli_t *cli) {
+
+    cmd_tree_cursor_t *cmdtc = cli->cmdtc;
+    cli_t *cli_prev = cli->prev;
+    cli_t *cli_next = cli->next;
+
+    memset (cli, 0, sizeof (sizeof (cli_t)));
+    cli->cmdtc = cmdtc;
+    cli->prev = cli_prev;
+    cli->next = cli_next;
+}
+
+unsigned char *cli_get_cli_buffer (cli_t *cli) {
+
+    return cli->clibuff;
 }
 
 void cli_printsc (cli_t *cli, bool next_line) {
@@ -193,8 +211,10 @@ cli_screen_cursor_move_cursor_right (int cols) {
 void 
 cli_set_hdr (cli_t *cli, unsigned char *new_hdr, uint8_t size) {
 
-    memset (cli, 0, sizeof (cli_t));
-    memcpy (cli->clibuff , new_hdr, size);
+    if (new_hdr) {
+        cli_complete_reset (cli);
+        memcpy (cli->clibuff , new_hdr, size);
+    }
     cli->start_pos = size;
     cli->current_pos = cli->start_pos;
     cli->end_pos = cli->start_pos;
@@ -299,6 +319,12 @@ cli_process_key_interrupt(int ch)
     case ctrl('w'):
         /* ToDo : Delete the current Word */
         break;
+    case '?':
+            cmdtc_process_question_mark(default_cli->cmdtc);
+        break;
+    case '/':
+            cmd_tree_enter_mode (default_cli->cmdtc);
+        break;
     case ctrl('l'):
         clear();
         cli_printsc(default_cli, true);
@@ -369,10 +395,12 @@ cli_process_key_interrupt(int ch)
         break;
     case KEY_ASCII_NEWLINE:
     case KEY_ENTER:
-        cli_screen_cursor_save_screen_pos(default_cli);
-        move(default_cli->row_store, default_cli->end_pos);
+       
         if (default_cli_history_list->curr_ptr == NULL)
         {
+            cmd_tree_process_carriage_return_key(default_cli->cmdtc);
+            cli_screen_cursor_save_screen_pos(default_cli);
+            move(default_cli->row_store, default_cli->end_pos);
             if (!cli_application_process(default_cli))
             {
                 cli_record_copy(default_cli_history_list, default_cli);
@@ -382,6 +410,9 @@ cli_process_key_interrupt(int ch)
         }
         else
         {
+             /* Do not entertain enter key if user has not typed a complete word*/
+            cli_screen_cursor_save_screen_pos(default_cli);
+            move(default_cli->row_store, default_cli->end_pos);
             cli_application_process(default_cli);
             assert(cli_store);
             default_cli = cli_store;

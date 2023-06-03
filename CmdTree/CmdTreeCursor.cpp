@@ -9,7 +9,6 @@
 #include "CmdTreeCursor.h"
 #include "../KeyProcessor/KeyProcessor.h"
 
-
 extern void
 cli_process_key_interrupt(int ch);
 
@@ -24,47 +23,38 @@ typedef enum cmdt_cursor_state_ {
 
 typedef struct cmd_tree_cursor_ {
 
+    param_t *root;
     Stack_t *stack;
+    int stack_checkpoint;
     ser_buff_t *tlv_buffer;
     param_t *curr_param;
     int icursor;
     cmdt_tree_cursor_state_t cmdtc_state;
     glthread_t matching_params_list;
     param_t *leaf_param;
-    cli_t *cli; 
 } cmd_tree_cursor_t;
 
 static cmd_tree_cursor_t *default_cmdtc = NULL;
 
-static param_t *
-cmdtc_get_child_param (cmd_tree_cursor_t *cmdtc) {
-
-    if (!IS_GLTHREAD_LIST_EMPTY (&cmdtc->matching_params_list)) {
-
-        return glue_to_param (glthread_get_next (&cmdtc->matching_params_list));
-    }
-
-    return cmdtc->leaf_param;
-}
-
 void 
-cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc, cli_t *cli) {
+cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc) {
 
     *cmdtc = (cmd_tree_cursor_t *)calloc (1, sizeof (cmd_tree_cursor_t));
+    (*cmdtc)->root = libcli_get_root_hook();
     (*cmdtc)->stack = get_new_stack();
+    (*cmdtc)->stack_checkpoint = -1;    
       init_serialized_buffer_of_defined_size (&((*cmdtc)->tlv_buffer), TLV_MAX_BUFFER_SIZE);
     (*cmdtc)->curr_param = libcli_get_root_hook();
     (*cmdtc)->icursor=0;
     (*cmdtc)->cmdtc_state = cmdt_cur_state_init;
     (*cmdtc)->matching_params_list = {0, 0};
     (*cmdtc)->leaf_param = NULL;
-    (*cmdtc)->cli = cli;   
 }
 
 void 
 cmd_tree_default_cursor_init () {
 
-    cmd_tree_cursor_init (&default_cmdtc, NULL);
+    cmd_tree_cursor_init (&default_cmdtc);
 }
 
 cmd_tree_cursor_t *
@@ -73,20 +63,18 @@ cmf_tree_get_default_cursor () {
     return default_cmdtc;
 }
 
+
 void 
-cmd_tree_cursor_reset (cmd_tree_cursor_t *cmdtc) {
+cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
 
     glthread_t *curr;
     reset_stack (cmdtc->stack);
+    cmdtc->stack_checkpoint = -1;
     reset_serialize_buffer (cmdtc->tlv_buffer);
     cmdtc->curr_param = NULL;
     cmdtc->icursor = 0;
     cmdtc->cmdtc_state = cmdt_cur_state_init;
-
-    while ((curr = dequeue_glthread_first (&cmdtc->matching_params_list))) {
-        remove_glthread(curr);
-    }
-
+    while ((dequeue_glthread_first (&cmdtc->matching_params_list)));
     cmdtc->leaf_param = NULL;
 }
 
@@ -159,6 +147,12 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
     int row, col1, col2;
     getyx(stdscr, row, col1);
 
+    if (IS_GLTHREAD_LIST_EMPTY (&cmdtc->matching_params_list) &&
+            !cmdtc->leaf_param) {
+        /* Nothing to display */
+        return;
+    }
+
     cli_screen_cursor_move_next_line ();
 
     ITERATE_GLTHREAD_BEGIN (&cmdtc->matching_params_list, curr) {
@@ -177,10 +171,11 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
             GET_PARAM_HELP_STRING(cmdtc->leaf_param));        
     }
 
-    cli_printsc (cmdtc->cli, false);
+    cli_printsc (cli_get_default_cli(), false);
     getyx(stdscr, row, col2);
     move (row, col1);
 }
+
 
 static  cmdt_cursor_op_res_t
 cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) ;
@@ -332,6 +327,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                     cmdtc->curr_param = cmdtc->leaf_param;
                     cmdtc->cmdtc_state =  cmdt_cur_state_matching_leaf;
                     cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+                    cmdtc->icursor++;
                     return cmdt_cursor_ok;
                 }
                 /* no matching word, and no leaf to accept value, block the user*/
@@ -380,6 +376,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                     cmdtc->curr_param = cmdtc->leaf_param;
                     cmdtc->cmdtc_state =  cmdt_cur_state_matching_leaf;
                     cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+                    cmdtc->icursor++;
                     return cmdt_cursor_ok;
                 }
                 /* no matching word, and no leaf to accept value, block the user*/
@@ -414,6 +411,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                     cmdtc->curr_param = cmdtc->leaf_param;
                     cmdtc->cmdtc_state =  cmdt_cur_state_matching_leaf;
                     cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+                    cmdtc->icursor++;
                     return cmdt_cursor_ok;
                 }
                 /* no matching word, and no leaf to accept value, block the user*/
@@ -444,4 +442,184 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
     assert(0);
     return cmdt_cursor_no_match_further;
+ }
+
+bool 
+cmdtc_is_cursor_at_bottom_mode_node (cmd_tree_cursor_t *cmdtc) {
+
+    param_t *param = cmdtc->curr_param;
+
+    return (param->options[0] == NULL);
+}
+
+/* Cmd Tree Cursor based functions */
+void 
+cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc) {
+
+    cli_t *cli;
+    int mcount;
+
+    cli = cli_get_default_cli();
+
+    if (!cli_cursor_is_at_end_of_line (cli)) return;
+    if (cmdtc_is_cursor_at_bottom_mode_node (cmdtc)) return;
+
+    /* If we have already computed next set of alternatives, display them. We would
+        compute them if user has began typing  new word in a CLI*/
+    if (!IS_GLTHREAD_LIST_EMPTY (&cmdtc->matching_params_list) ||
+            cmdtc->leaf_param) {
+        
+        cmdt_cursor_display_options (cmdtc);
+        return;
+    }
+
+    /* If user has not typed beginning a new word in a cli, then compute the next
+        set pf alternatives*/
+
+    mcount = cmdt_collect_all_matching_params (cmdtc, 'X', true);
+    cmdt_cursor_display_options (cmdtc);
+    cmdtc->leaf_param = NULL;
+    while (dequeue_glthread_first(&cmdtc->matching_params_list)) ;
+}
+
+void
+cmdtc_show_complete_clis (cmd_tree_cursor_t *cmdtc) {
+
+}
+
+void 
+cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
+
+    cli_t *cli;
+    glthread_t *curr;
+    param_t *param;
+    glthread_t temp_list;
+    
+    int byte_count = 0;
+
+    init_glthread (&temp_list);
+
+    cli = cli_get_default_cli();
+
+    if (cmdtc->root == cmdtc->curr_param) return;
+    if (!cli_cursor_is_at_end_of_line (cli)) return;
+    if (cli_cursor_is_at_begin_of_line (cli)) return;
+    if (cmdtc->cmdtc_state != cmdt_cur_state_init) return;
+    if (cmdtc_is_cursor_at_bottom_mode_node (cmdtc)) return;
+
+    while ((param = (param_t *)pop (cmdtc->stack))) {
+        assert (!IS_QUEUED_UP_IN_THREAD (&param->glue));
+        glthread_add_next (&temp_list, &param->glue);
+    }
+
+    cli_complete_reset (cli);
+    unsigned char *buffer = cli_get_cli_buffer (cli);
+    
+    byte_count += snprintf ((char *)buffer + byte_count, 
+                            MAX_COMMAND_LENGTH, "%s", DEF_CLI_HDR);
+
+    ITERATE_GLTHREAD_BEGIN(&temp_list, curr) {
+
+        param = glue_to_param (curr);
+
+        if (IS_PARAM_CMD (param)) {
+
+            byte_count += snprintf ((char *)buffer + byte_count, 
+                            MAX_COMMAND_LENGTH - byte_count, "%s-", GET_CMD_NAME(param));
+        }
+        else {
+            
+            byte_count += snprintf ((char *)buffer + byte_count, 
+                            MAX_COMMAND_LENGTH - byte_count, "%s-", GET_LEAF_VALUE_PTR(param));
+
+        }
+    }ITERATE_GLTHREAD_END(&temp_list, curr) 
+
+    buffer[byte_count - 1] = '>';
+    buffer[byte_count] = ' ';
+    byte_count++;
+
+    cli_set_hdr (cli, NULL, byte_count);
+
+    /* Prepare the stack again*/
+    while ((curr = dequeue_glthread_first (&temp_list))) {
+
+         param = glue_to_param (curr);
+         push (cmdtc->stack , (void *)param);
+    }
+
+    /* Save the contect of where we are now in CLI tree*/
+    cmdtc->root = cmdtc->curr_param;
+    serialize_buffer_mark_checkpoint (cmdtc->tlv_buffer);
+    cmdtc->stack_checkpoint = cmdtc->stack->top;
+
+    cli_printsc (cli, true);
+}
+
+static void 
+cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
+
+    int i;
+    int count = 1;
+    param_t *param;
+    op_mode enable_or_diable;
+
+    int tlv_buffer_original_size = tlv_buffer_get_size (cmdtc->tlv_buffer);
+    int tlv_buffer_checkpoint_offset = serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer);
+
+    param = (param_t *)cmdtc->stack->slot[0];
+
+    if (param == libcli_get_config_hook ()) {
+        /* ToDo : Support Command Negation !*/
+        enable_or_diable = CONFIG_ENABLE;
+    }
+    else {
+        enable_or_diable = OPERATIONAL;
+    }
+
+    for (i = cmdtc->stack_checkpoint + 1 ; i <= cmdtc->stack->top; i++) {
+
+        param = (param_t *)cmdtc->stack->slot[i];
+
+        if (!param->callback)  {
+            count++;
+            continue;
+        }
+        /* Temporarily over-write the size of TLV buffer */
+        cmdtc->tlv_buffer->next = tlv_buffer_checkpoint_offset + (sizeof (tlv_struct_t) * count);
+        count++;
+        param->callback (param, cmdtc->tlv_buffer, enable_or_diable);
+    }
+
+    cmdtc->tlv_buffer->next = tlv_buffer_original_size;
+}
+
+void 
+cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
+
+    cli_t *cli = cli_get_default_cli();
+
+    /* User has simply pressed the entry key wihout typing anything.
+        Nothing to do by cmdtree cursor, Keyprocessor will simply shift
+        the cursor to next line*/
+    if (cli_is_buffer_empty (cli)) return;
+
+    switch (cmdtc->cmdtc_state) {
+        
+        case cmdt_cur_state_init:
+            /* Fire the CLI*/
+            cmd_tree_trigger_cli (cmdtc);
+            return;
+        case cmdt_cur_state_multiple_matches:
+            return;
+        case cmdt_cur_state_single_word_match:
+            /* Auto complete the word , push into the stack and fire the CLI*/
+            return;
+        case cmdt_cur_state_matching_leaf:
+            /* Push it into the stack and Fire the CLI*/
+            return;
+        case cmdt_cur_state_no_match:
+            return;
+        default: ;
+    }
  }

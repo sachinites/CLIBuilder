@@ -12,6 +12,7 @@ void cli_key_processor_init (cli_t **) ;
 void cli_key_processor_cleanup ();
 
 void cli_content_reset (cli_t *cli);
+void cli_complete_reset (cli_t *cli);
 
 void cli_printsc (cli_t *cli, bool next_line) ;
 
@@ -22,6 +23,8 @@ cli_t * cli_get_default_cli () ;
 void cli_set_default_cli (cli_t *cli) ;
 
 void cli_set_hdr (cli_t *cli, unsigned char *new_hdr, uint8_t size);
+
+unsigned char *cli_get_cli_buffer (cli_t *cli);
 
 bool
 cli_cursor_is_at_end_of_line (cli_t *cli);

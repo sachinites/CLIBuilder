@@ -27,7 +27,7 @@ void serialize_double(ser_buff_t *b, double data);
 void serialize_string(ser_buff_t *b, char *data, int size);
 char is_serialized_buffer_empty(ser_buff_t *b);
 /* get functions*/
-int  get_serialize_buffer_size(ser_buff_t *b);
+int  tlv_buffer_get_size(ser_buff_t *b);
 int get_serialize_buffer_current_ptr_offset(ser_buff_t *b);
 char *get_serialize_buffer_current_ptr(ser_buff_t *b);
 void serialize_buffer_skip(ser_buff_t *b, int size);
@@ -45,8 +45,8 @@ void free_serialize_buffer(ser_buff_t *b);
 void truncate_serialize_buffer(ser_buff_t **b);
 void reset_serialize_buffer(ser_buff_t *b);
 void restore_checkpoint_serialize_buffer(ser_buff_t *b);
-int get_serialize_buffer_checkpoint_offset(ser_buff_t *b);
-void mark_checkpoint_serialize_buffer(ser_buff_t *b);
+int serialize_buffer_get_checkpoint_offset(ser_buff_t *b);
+void serialize_buffer_mark_checkpoint(ser_buff_t *b);
 /* Details*/
 void print_buffer_details(ser_buff_t *b, const char *fn, int lineno);
 

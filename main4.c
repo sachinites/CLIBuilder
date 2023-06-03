@@ -6,6 +6,23 @@ typedef struct cli_ cli_t;
 cli_t *cli = NULL;
 
 int
+node_callback_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_disable){
+    
+    tlv_struct_t *tlv;
+
+    printw("\n%s() is called ...cmcode = %d, cbk = %p\n", 
+        __FUNCTION__, param->CMDCODE, param->callback);
+
+    TLV_LOOP_BEGIN (tlv_buf, tlv) {
+
+        print_tlv_content (tlv);
+
+    } TLV_LOOP_END;
+    
+    return 0;
+}
+
+int
 main(int argc, char **argv){
 
     cli_key_processor_init (&cli);
@@ -37,7 +54,7 @@ main(int argc, char **argv){
             init_param(&node_name,      /*Address of the current param*/
                       LEAF,             /*CMD for command param, LEAF for leaf param. Since it is a leaf param which takes node names, hence pass LEAF*/
                       0,                /*Always NULL for LEAF param*/
-                      0, /*Since this is complete command, it should invoke application routine. Pass the pointer to that routine here.*/
+                      node_callback_handler, /*Since this is complete command, it should invoke application routine. Pass the pointer to that routine here.*/
                       0,   /*Optional : can be NULL. This is also application specific routine, and perform validation test 
                                              to the value entered by the user for this leaf param. If validation pass, then only node_callback_handler routine is invoked*/
                       STRING,               /*leaf param value type. Node name is string, hence pass STRING*/
@@ -47,7 +64,7 @@ main(int argc, char **argv){
             /*The below API should be called for param upto which the command is supposed to invoke application callback rouine. 
              * The CMDODE_SHOW_NODE code is sent to application using which we find which command was triggered, and accordingly what 
              * are expected leaf params we need to parse. More on this ater.*/
-
+            set_param_cmd_code (&node_name, 1);
             /*Implementing CMD2*/
 
             {
@@ -70,7 +87,7 @@ main(int argc, char **argv){
                     init_param(&loopback_address,      /*Address of the current param*/
                             LEAF,                      /*CMD for command param, LEAF for leaf param. Since it is a leaf param which takes node names, hence pass LEAF*/
                             0,                         /*Always NULL for LEAF param*/
-                            0, /*Since this is complete command, it should invoke application routine. Pass the pointer to that routine here.*/
+                            node_callback_handler, /*Since this is complete command, it should invoke application routine. Pass the pointer to that routine here.*/
                             0,      /*Optional : can be NULL. This is also application specific routine, and perform validation test 
                                                               to the value entered by the user for this leaf param. If validation pass, then only node_loopback_callback_handler routine is invoked*/
                             IPV4,                    /*leaf param value type. loopback address is IPV4 type, hence pass IPV4*/
@@ -80,6 +97,7 @@ main(int argc, char **argv){
                     /* The below API should be called for param at which the command is supposed to invoke application callback rouine. 
                      * This CMDODE_SHOW_NODE_LOOPBACK code is sent to application using which we find which command was triggered, and accordingly what 
                      * are expected leaf params we need to parse. More on this ater.*/
+                    set_param_cmd_code (&loopback_address, 2);
                 }
             }
         }
@@ -139,7 +157,7 @@ main(int argc, char **argv){
                     init_param(&loopback_address,      /*Address of the current param*/
                             LEAF,                      /*CMD for command param, LEAF for leaf param. Since it is a leaf param which takes node names, hence pass LEAF*/
                             0,                         /*Always NULL for LEAF param*/
-                            0, /*Since this is complete command, it should invoke application routine. Pass the pointer to that routine here.*/
+                            node_callback_handler, /*Since this is complete command, it should invoke application routine. Pass the pointer to that routine here.*/
                             0,      /*Optional : can be NULL. This is also application specific routine, and perform validation test 
                                                               to the value entered by the user for this leaf param. If validation pass, then only node_loopback_callback_handler routine is invoked*/
                             IPV4,                    /*leaf param value type. loopback address is IPV4 type, hence pass IPV4*/
@@ -149,6 +167,7 @@ main(int argc, char **argv){
                     /* The below API should be called for param at which the command is supposed to invoke application callback rouine. 
                      * This CMDODE_SHOW_NODE_LOOPBACK code is sent to application using which we find which command was triggered, and accordingly what 
                      * are expected leaf params we need to parse. More on this ater.*/
+                    set_param_cmd_code (&loopback_address, 3);
                 }
             }
         }

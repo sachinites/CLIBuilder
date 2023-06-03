@@ -46,7 +46,7 @@ char* get_serialize_buffer_current_ptr(ser_buff_t *b){
 	return  (char *)(b->b) + b->next;
 }
 
-int  get_serialize_buffer_size(ser_buff_t *b){
+int  tlv_buffer_get_size(ser_buff_t *b){
 	return b->next;
 }
 
@@ -76,14 +76,14 @@ restore_checkpoint_serialize_buffer(ser_buff_t *b){
 }
 
 void 
-mark_checkpoint_serialize_buffer(ser_buff_t *b){
+serialize_buffer_mark_checkpoint(ser_buff_t *b){
 
     if(!b) assert(0);
     b->checkpoint = b->next;
 }
 
 int
-get_serialize_buffer_checkpoint_offset(ser_buff_t *b){
+serialize_buffer_get_checkpoint_offset(ser_buff_t *b){
     return b->checkpoint;
 }
 

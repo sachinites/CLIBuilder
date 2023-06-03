@@ -39,16 +39,12 @@ typedef struct tlv_struct{
 } tlv_struct_t;
 #pragma pack(pop)
 
-
-#define EXTRACT_CMD_CODE(ser_buff_ptr)  \
-    atoi(reinterpret_cast<const char *>(((tlv_struct_t *)(ser_buff_ptr->b) + (get_serialize_buffer_size(ser_buff_ptr)/sizeof(tlv_struct_t) -1))->value))
-
 #define TLV_LOOP_BEGIN(ser_buff, tlvptr)                                                \
 {                                                                                       \
     assert(ser_buff);                                                                   \
     tlvptr = (tlv_struct_t *)(ser_buff->b);                                             \
-    unsigned int _i = 0, k = get_serialize_buffer_size(ser_buff)/sizeof(tlv_struct_t);   \
-    for(; _i < k-1; _i++, tlvptr++)
+    unsigned int _i = 0, k = tlv_buffer_get_size(ser_buff)/sizeof(tlv_struct_t);   \
+    for(; _i < k; _i++, tlvptr++)
 
 #define TLV_LOOP_END    }
 
@@ -100,7 +96,7 @@ dump_tlv_serialized_buffer(ser_buff_t *tlv_ser_buff){
 
     tlv_struct_t *tlv = NULL;
 
-    printw("cmd code = %d\n", EXTRACT_CMD_CODE(tlv_ser_buff));
+    //printw("cmd code = %d\n", EXTRACT_CMD_CODE(tlv_ser_buff));
     TLV_LOOP_BEGIN(tlv_ser_buff, tlv){
         print_tlv_content(tlv);
         printf("\n");

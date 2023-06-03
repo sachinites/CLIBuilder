@@ -11,8 +11,9 @@ typedef struct serialized_buffer ser_buff_t;
 
 typedef int (*user_validation_callback)(ser_buff_t *, unsigned char *leaf_value);
 typedef void (*display_possible_values_callback)(param_t *, ser_buff_t *);
-typedef int (*cmd_callback)(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_diable);
-
+typedef int (*cmd_callback)(param_t *param, 
+                                              ser_buff_t *tlv_buf, 
+                                              op_mode enable_or_diable);
 
 typedef struct cmd{
     char cmd_name[CMD_NAME_SIZE];
