@@ -55,6 +55,7 @@ cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc, cmdtc_cursor_type_t cmdtc_type)
     (*cmdtc)->matching_params_list = {0, 0};
     (*cmdtc)->leaf_param = NULL;
     (*cmdtc)->cmdtc_type = cmdtc_type;
+    (*cmdtc)->success = false;
 }
 
 void 
@@ -116,6 +117,52 @@ cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
     cmdtc->leaf_param = NULL;
 }
 
+/* This fn removes all the params from the params list whose len is not
+        equal to 'len' provided that after removal there should be exactly one
+        param left in this list. Return this param.
+        This fn must not change anything in the list if after removal of said words,
+        either list is empty Or more than one params of strlen = len stays in the
+        params_list.
+*/
+static param_t *
+cmdtc_filter_word_by_word_size (glthread_t *param_list, int len) {
+
+    int count;
+    glthread_t *curr;
+    param_t *param;
+    glthread_t temp_list;
+    char *param_word;
+
+    count = 0;
+    param = NULL;
+    init_glthread (&temp_list);
+
+    ITERATE_GLTHREAD_BEGIN (param_list, curr) {
+
+        param = glue_to_param (curr);
+        param_word = GET_CMD_NAME(param);
+        if (strlen (param_word) != len ) {
+            remove_glthread (curr);
+            glthread_add_next (&temp_list, curr);
+        }
+        else {
+            count++;
+        }
+    } ITERATE_GLTHREAD_END (param_list, curr) ;
+
+    if (count == 1) {
+         while (dequeue_glthread_first (&temp_list));
+         return  glue_to_param(glthread_get_next (param_list));
+    }
+
+    while ((curr = dequeue_glthread_first (&temp_list))) {
+        glthread_add_next (param_list, curr);
+    }
+
+    return NULL;
+}
+
+
 static int
 cmdtc_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, bool wildcard) {
 
@@ -170,10 +217,13 @@ cmdtc_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, bo
 
     if (!count) {
         /* None of the optiona matched, restore the list*/
-        //cmdtc->matching_params_list = temp_list;
+        #if 0
+        cmdtc->matching_params_list = temp_list;
+        #else
         while ((curr = dequeue_glthread_first (&temp_list))) {
             glthread_add_next (&cmdtc->matching_params_list, curr);
         }
+        #endif
     }
     else {
         while (dequeue_glthread_first (&temp_list));
@@ -287,8 +337,25 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
         case cmdt_cur_state_multiple_matches:
             /* User must not type space if there are more multiple matches*/
-            cmdt_cursor_display_options (cmdtc);
-            return cmdt_cursor_no_match_further;
+
+            /* Could be possible that user has fully typed-out the word and now pressed
+                 the space. But there are other words which satisfies the match criteria. For example,
+                 see below. User has typed a word 'loop' completely and now pressed ' '. In this case
+                 We should accept the word 'loop' and allow the user to type further despite that the
+                 other word 'loopback' also satisfies the match (multiple match case)
+                    Soft-Firewall>$ show node H1 loop
+                    nxt cmd  -> loopback                          |   Help : node
+                    nxt cmd  -> loop                                 |   Help : node
+            */
+            param = cmdtc_filter_word_by_word_size 
+                            (&cmdtc->matching_params_list, cmdtc->icursor);
+            if (!param) {
+                cmdt_cursor_display_options (cmdtc);
+                return cmdt_cursor_no_match_further;
+            }
+            cmdtc->curr_param = param;
+            cmd_tree_cursor_move_to_next_level (cmdtc);
+            return cmdt_cursor_ok;
 
         case cmdt_cur_state_single_word_match:
             /* only one option is matching and that is fixed word , do auto-completion*/

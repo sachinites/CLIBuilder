@@ -17,13 +17,14 @@
 #define TLV_MAX_BUFFER_SIZE     1024
 #define POSSIBILITY_ARRAY_SIZE  10
 
-
+#define KEY_BACKSPACE_MOBAXTERM 8 /* I found, in MobaXterm on Windows, BS has ascii of 8*/
 #define KEY_ASCII_TAB   9
 #define KEY_ASCII_NEWLINE 10
 #define CLI_HISTORY_LIMIT   10
 
-
 #define NEGATE_CHARACTER "no"
+
+
 
 typedef enum{
     CONFIG_DISABLE,

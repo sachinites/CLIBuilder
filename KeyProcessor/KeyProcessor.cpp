@@ -399,7 +399,9 @@ cli_process_key_interrupt(int ch)
         cli_screen_cursor_move_cursor_right(default_cli->end_pos - default_cli->current_pos);
         default_cli->current_pos = default_cli->end_pos;
         break;
-    case KEY_BACKSPACE:
+    /* Need to be careful with Backspace key as its ascii code varies on different systems*/
+    case KEY_BACKSPACE:  /*On Linux Platform, BS has ascii code of 263*/
+    case KEY_BACKSPACE_MOBAXTERM: /* On Windows, BS has ascii code of 8*/
         /* Case 1 : if we are at the beginning of line */
         if (default_cli->current_pos == default_cli->start_pos)
             break;
