@@ -101,6 +101,7 @@ cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
     cmdtc->cmdtc_state = cmdt_cur_state_init;
     while ((dequeue_glthread_first (&cmdtc->matching_params_list)));
     cmdtc->leaf_param = NULL;
+    cmdtc->success = false;
 }
 
 void 
@@ -116,11 +117,12 @@ cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
 }
 
 static int
-cmdt_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, bool wildcard) {
+cmdtc_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, bool wildcard) {
 
     int i, count = 0;
     glthread_t *curr;
     param_t *child_param;
+    glthread_t temp_list;
 
     assert (cmdtc->cmdtc_type ==cmdtc_type_cbc);
 
@@ -149,18 +151,33 @@ cmdt_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, boo
 
     count = get_glthread_list_count(&cmdtc->matching_params_list);
 
+    if (wildcard) return count;
+
+    init_glthread(&temp_list);
+
     /* if list is not empty, then refine the list now*/
     ITERATE_GLTHREAD_BEGIN (&cmdtc->matching_params_list, curr) {
 
         child_param = glue_to_param(curr);
         assert (IS_PARAM_CMD (child_param));
-        if (!wildcard &&
-             (GET_CMD_NAME(child_param))[cmdtc->icursor] != c) {
+        if ((GET_CMD_NAME(child_param))[cmdtc->icursor] != c) {
             count--;
             remove_glthread (&child_param->glue);
+            glthread_add_next (&temp_list, &child_param->glue);
         }
         
     } ITERATE_GLTHREAD_END (&cmdtc->matching_params_list, curr) 
+
+    if (!count) {
+        /* None of the optiona matched, restore the list*/
+        //cmdtc->matching_params_list = temp_list;
+        while ((curr = dequeue_glthread_first (&temp_list))) {
+            glthread_add_next (&cmdtc->matching_params_list, curr);
+        }
+    }
+    else {
+        while (dequeue_glthread_first (&temp_list));
+    }
 
     return count;
 }
@@ -221,7 +238,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
             /* User is typing ' ' even without typing any character for the next word
             In this case, if there is only one alternate option, then only go for
             auto-completion. In rest of the cases, block user and display alternatives*/
-            mcount = cmdt_collect_all_matching_params (cmdtc, 'X', true);
+            mcount = cmdtc_collect_all_matching_params (cmdtc, 'X', true);
 
             if (mcount == 0) {
 
@@ -319,7 +336,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
             
             assert ( cmdtc->icursor == 0);
 
-            mcount = cmdt_collect_all_matching_params (cmdtc, c, false);
+            mcount = cmdtc_collect_all_matching_params (cmdtc, c, false);
 
             /* Case 1 : When exactly 1 single param (keyword) matches . it cannot be leaf param*/
             if (mcount == 1) {
@@ -370,7 +387,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
     case cmdt_cur_state_multiple_matches:
 
-            mcount = cmdt_collect_all_matching_params (cmdtc, c, false);
+            mcount = cmdtc_collect_all_matching_params (cmdtc, c, false);
 
             /* Case 1 : When exactly 1 single param patches . it could be leaf param*/
             if (mcount == 1) {
@@ -418,7 +435,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
 
     case cmdt_cur_state_single_word_match:
-         mcount = cmdt_collect_all_matching_params (cmdtc, c, false);
+         mcount = cmdtc_collect_all_matching_params (cmdtc, c, false);
 
           /* Case 1 : When the same param continues to be matched, and this is cmd param only*/
             if (mcount == 1) {
@@ -508,7 +525,7 @@ cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc) {
     /* If user has not typed beginning a new word in a cli, then compute the next
         set pf alternatives*/
 
-    mcount = cmdt_collect_all_matching_params (cmdtc, 'X', true);
+    mcount = cmdtc_collect_all_matching_params (cmdtc, 'X', true);
     cmdt_cursor_display_options (cmdtc);
     cmdtc->leaf_param = NULL;
     while (dequeue_glthread_first(&cmdtc->matching_params_list)) ;
@@ -616,8 +633,8 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
         user is operating in mode */
     cmdtc->curr_param = cmdtc->root;
 
-    assert (!cmdtc->icursor);
-
+    cmdtc->icursor = 0;
+    cmdtc->success = false;
     cmdtc->cmdtc_state= cmdt_cur_state_init;
 
     while ((dequeue_glthread_first (&cmdtc->matching_params_list)));
@@ -669,7 +686,6 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
             break;
         }
     }
-
     cmdtc->tlv_buffer->next = tlv_buffer_original_size;
 }
 
@@ -690,6 +706,7 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
             /*User has typed the complete current word, fir the CLI if last word
                 has appln callback, thenFire the CLI*/
             cmd_tree_trigger_cli (cmdtc);
+            if (cmdtc->success) {  cmd_tree_post_cli_trigger (cli);   }
             cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         case cmdt_cur_state_multiple_matches:
@@ -704,12 +721,14 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
             }
             cmd_tree_cursor_move_to_next_level (cmdtc);
             cmd_tree_trigger_cli (cmdtc);
+            if (cmdtc->success) {  cmd_tree_post_cli_trigger (cli);   }
             cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         case cmdt_cur_state_matching_leaf:
             /* Push it into the stack and Fire the CLI*/
             cmd_tree_cursor_move_to_next_level (cmdtc);
             cmd_tree_trigger_cli (cmdtc);
+            if (cmdtc->success) {  cmd_tree_post_cli_trigger (cli);   }
             cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         case cmdt_cur_state_no_match:
@@ -721,6 +740,7 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
 
 /* Below Fns are for prsing the command word by word*/
 static unsigned char command[MAX_COMMAND_LENGTH];
+
 static param_t*
 array_of_possibilities[POSSIBILITY_ARRAY_SIZE];
 
@@ -813,30 +833,65 @@ cmdtc_parse_full_command (cli_t *cli) {
     re_init_tokens(MAX_CMD_TREE_DEPTH);
 
     unsigned char *cmd = cli_get_user_command(cli, &cmd_size);
+    
+    memset (command, 0, MAX_COMMAND_LENGTH);
     memcpy (command, cmd, cmd_size);
 
     tokens = tokenizer(command, ' ', &token_cnt);
-    if (!token_cnt) return false;
+    
+    if (!token_cnt) {
+
+        cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
+        return false;
+    }
 
     param = cmdtc->root;
 
-    for(i= 0; i < token_cnt; i++){
+    for (i= 0; i < token_cnt; i++) {
 
         param = find_matching_param(&param->options[0], *(tokens +i));
-        if (!param) return false;
 
-        if (IS_PARAM_LEAF(param) &&
-                param->cmd_type.leaf->user_validation_cb_fn) {
-            if (!param->cmd_type.leaf->user_validation_cb_fn (
-                    cmdtc->tlv_buffer, (unsigned char *)*(tokens +i))) {
+        if (!param){
+            printw ("\nCLI Error : Unrecognized Param : %s", *(tokens + i));
+            cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
+            return false;
+        }
+
+        memset(&tlv, 0, sizeof(tlv_struct_t));
+
+        if (IS_PARAM_LEAF(param)) {
+
+            if (param->cmd_type.leaf->user_validation_cb_fn &&
+
+                (param->cmd_type.leaf->user_validation_cb_fn(
+                    cmdtc->tlv_buffer, (unsigned char *)*(tokens + i)) == VALIDATION_FAILED)) {
+
+                printw ("\nCLI Error : User Validation Failed for Param : %s", *(tokens + i));
+                cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
                 return false;
             }
+
+            /* Note : We are not saving values within a leaf->value*/
+            prepare_tlv_from_leaf(GET_PARAM_LEAF(param), (&tlv));
+            put_value_in_tlv((&tlv), *(tokens +i));
+            collect_tlv(cmdtc->tlv_buffer, &tlv);
+        }
+        else {
+            cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
         }
         push(cmdtc->stack, (void *)param);
-        cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
     }
+
     /* Set the last param which holds the callback*/
     cmdtc->curr_param = param; 
     cmd_tree_trigger_cli(cmdtc);
+    if (cmdtc->success) {  cmd_tree_post_cli_trigger (cli);   }
+    cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
     return true;
+}
+
+void 
+cmd_tree_post_cli_trigger (cli_t *cli) {
+
+    printw ("\nParse Success");
 }

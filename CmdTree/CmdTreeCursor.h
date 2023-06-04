@@ -52,4 +52,7 @@ cmdtc_parse_full_command (cli_t *cli);
 void 
 cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) ;
 
+void 
+cmd_tree_post_cli_trigger (cli_t *cli);
+
 #endif 

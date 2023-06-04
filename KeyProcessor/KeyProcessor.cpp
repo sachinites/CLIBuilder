@@ -59,6 +59,8 @@ key_processor_should_enter_line_mode (int key) {
         case ctrl('n'):
         case ctrl('w'):
         case KEY_DC:
+        case KEY_UP:
+        case KEY_DOWN:
             return true;
     }
 
@@ -71,6 +73,7 @@ key_processor_should_enter_line_mode (int key) {
             case KEY_ASCII_NEWLINE:
                 break;
             default:
+                /* If we attempt to modify or work with the historical command, Immediately enter into line mode*/
                 return true;
         }
     }
@@ -83,6 +86,8 @@ cli_application_process (cli_t *cli) {
     int ret = -1;
     bool parse_rc = true;
 
+    if (cli_is_buffer_empty (cli)) return -1;
+    
     if (cli_is_char_mode_on ()) {
 
         cmd_tree_process_carriage_return_key(cli->cmdtc);
@@ -464,9 +469,12 @@ cli_process_key_interrupt(int ch)
         {
             cli_screen_cursor_save_screen_pos(default_cli);
             move(default_cli->row_store, default_cli->end_pos);
+            assert(!default_cli->cmdtc);
+            default_cli->cmdtc = cmd_tree_get_cursor (cmdtc_type_wbw);
             if (!cli_application_process(default_cli)) {
                 cli_record_copy(default_cli_history_list, default_cli);
             }
+            default_cli->cmdtc = NULL;
             assert(cli_store);
             default_cli = cli_store;
             cli_store = NULL;
@@ -600,10 +608,6 @@ cli_process_key_interrupt(int ch)
                 break;
             }    
     case '.':
-            if (cli_is_char_mode_on()) {
-                // ToDO : auto-complete all possible CLIs here
-                break;
-            } 
     default:
         if (default_cli->cnt == MAX_COMMAND_LENGTH)
             break;
@@ -656,7 +660,7 @@ cli_start_shell () {
     while (true) {
         ch = getch();
 
-        if (keyp_char_mode) {
+        if (cli_is_char_mode_on()) {
 
             if (key_processor_should_enter_line_mode (ch)) {
                 keyp_char_mode = false;
