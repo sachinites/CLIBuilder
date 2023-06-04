@@ -32,12 +32,17 @@ typedef struct cmd_tree_cursor_ {
     cmdt_tree_cursor_state_t cmdtc_state;
     glthread_t matching_params_list;
     param_t *leaf_param;
+    cmdtc_cursor_type_t cmdtc_type;
+    bool success;  /* Was command successfully triggered*/
 } cmd_tree_cursor_t;
 
-static cmd_tree_cursor_t *default_cmdtc = NULL;
+/* This cursor will be used when we are working in line-by-line mode*/
+static cmd_tree_cursor_t *cmdtc_wbw = NULL;
+/* This cursor will be used to prse the CLIs when Operating in Char-by-char Mode*/
+static cmd_tree_cursor_t *cmdtc_cbc = NULL;
 
 void 
-cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc) {
+cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc, cmdtc_cursor_type_t cmdtc_type) {
 
     *cmdtc = (cmd_tree_cursor_t *)calloc (1, sizeof (cmd_tree_cursor_t));
     (*cmdtc)->root = libcli_get_root_hook();
@@ -49,18 +54,39 @@ cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc) {
     (*cmdtc)->cmdtc_state = cmdt_cur_state_init;
     (*cmdtc)->matching_params_list = {0, 0};
     (*cmdtc)->leaf_param = NULL;
+    (*cmdtc)->cmdtc_type = cmdtc_type;
 }
 
 void 
-cmd_tree_default_cursor_init () {
+cmd_tree_init_cursors () {
 
-    cmd_tree_cursor_init (&default_cmdtc);
+    cmd_tree_cursor_init (&cmdtc_wbw, cmdtc_type_wbw);
+    cmd_tree_cursor_init (&cmdtc_cbc, cmdtc_type_cbc);
 }
 
 cmd_tree_cursor_t *
-cmd_tree_get_default_cursor () {
+cmd_tree_get_cursor (cmdtc_cursor_type_t cmdtc_type) {
 
-    return default_cmdtc;
+    switch (cmdtc_type) {
+
+        case cmdtc_type_wbw:
+            return cmdtc_wbw;
+        case cmdtc_type_cbc:
+            return cmdtc_cbc;
+    }
+    return NULL;
+}
+
+bool
+cmdtc_get_cmd_trigger_status (cmd_tree_cursor_t *cmdtc) {
+
+    return cmdtc->success;
+}
+
+cmdtc_cursor_type_t
+cmdtc_get_type (cmd_tree_cursor_t *cmdtc) {
+
+    return cmdtc->cmdtc_type;
 }
 
 void 
@@ -95,6 +121,8 @@ cmdt_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, boo
     int i, count = 0;
     glthread_t *curr;
     param_t *child_param;
+
+    assert (cmdtc->cmdtc_type ==cmdtc_type_cbc);
 
     if (IS_GLTHREAD_LIST_EMPTY (&cmdtc->matching_params_list)) {
 
@@ -275,7 +303,11 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
     param_t *param;
     cmdt_cursor_op_res_t rc = cmdt_cursor_ok;
 
-    if (c == ' ') {
+    if (!cli_is_char_mode_on()) {
+        return cmdt_cursor_ok;
+    }
+
+    if (c == ' ' || c == KEY_ASCII_TAB) {
 
         return cmdt_cursor_process_space (cmdtc);
     }
@@ -447,7 +479,6 @@ bool
 cmdtc_is_cursor_at_bottom_mode_node (cmd_tree_cursor_t *cmdtc) {
 
     param_t *param = cmdtc->curr_param;
-
     return (param->options[0] == NULL);
 }
 
@@ -457,6 +488,8 @@ cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc) {
 
     cli_t *cli;
     int mcount;
+
+    if (!cli_is_char_mode_on ()) return;
 
     cli = cli_get_default_cli();
 
@@ -496,6 +529,8 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     
     int byte_count = 0;
 
+    if (!cli_is_char_mode_on ()) return;
+
     init_glthread (&temp_list);
 
     cli = cli_get_default_cli();
@@ -512,7 +547,7 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     }
 
     cli_complete_reset (cli);
-    unsigned char *buffer = cli_get_cli_buffer (cli);
+    unsigned char *buffer = cli_get_cli_buffer (cli, NULL);
     
     byte_count += snprintf ((char *)buffer + byte_count, 
                             MAX_COMMAND_LENGTH, "%s", DEF_CLI_HDR);
@@ -557,16 +592,23 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
 
 /* This fn resets the cmd tree cursor back to pavilion to be
     ready to process next command*/
-static void 
+void 
 cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
 
-    /* Its Optional to reset the stack since it is checkpointed.
-        But i choose to reset the stack to ease debugging in gdb*/
-    assert(cmdtc->stack->top >= cmdtc->stack_checkpoint);
-    while (cmdtc->stack->top > cmdtc->stack_checkpoint) pop(cmdtc->stack);
+    param_t *param;
 
-    /* It is optional to reset the serialized TLV buffer for the same reason.
-        But let me choose to cleanit up as a good practice.*/
+    assert(cmdtc->stack->top >= cmdtc->stack_checkpoint);
+
+    while (cmdtc->stack->top > cmdtc->stack_checkpoint) {
+
+        param = (param_t *)pop(cmdtc->stack);
+
+        if (IS_PARAM_LEAF(param)) {
+            memset (GET_LEAF_VALUE_PTR(param), 0, LEAF_VALUE_HOLDER_SIZE);
+        }
+    }
+
+    /* It is optional to reset the serialized TLV buffer for the same reason. But let me choose to cleanit up as a good practice.*/
     serialize_buffer_restore_checkpoint(cmdtc->tlv_buffer);
 
     /* Set back the curr_param to start of the root of the tree. Root of the
@@ -596,6 +638,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
         printw("\nError : Incomplete CLI...");
         return;
     }
+    cmdtc->success = true;
 
     int tlv_buffer_original_size = tlv_buffer_get_size (cmdtc->tlv_buffer);
     int tlv_buffer_checkpoint_offset = serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer);
@@ -621,7 +664,10 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
         /* Temporarily over-write the size of TLV buffer */
         cmdtc->tlv_buffer->next = tlv_buffer_checkpoint_offset + (sizeof (tlv_struct_t) * count);
         count++;
-        param->callback (param, cmdtc->tlv_buffer, enable_or_diable);
+        if (param->callback (param, cmdtc->tlv_buffer, enable_or_diable)) {
+            cmdtc->success = false;
+            break;
+        }
     }
 
     cmdtc->tlv_buffer->next = tlv_buffer_original_size;
@@ -636,7 +682,8 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
         Nothing to do by cmdtree cursor, Keyprocessor will simply shift
         the cursor to next line*/
     if (cli_is_buffer_empty (cli)) return;
-
+    if (!cli_is_char_mode_on ()) return;
+    
     switch (cmdtc->cmdtc_state) {
         
         case cmdt_cur_state_init:
@@ -671,3 +718,125 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
         default: ;
     }
  }
+
+/* Below Fns are for prsing the command word by word*/
+static unsigned char command[MAX_COMMAND_LENGTH];
+static param_t*
+array_of_possibilities[POSSIBILITY_ARRAY_SIZE];
+
+static inline int
+is_cmd_string_match(param_t *param, const char *str, bool *ex_match){
+    
+    *ex_match = false;
+    int str_len = strlen(str);
+    int str_len_param = strlen(param->cmd_type.cmd->cmd_name);
+
+    int rc =  (strncmp(param->cmd_type.cmd->cmd_name, 
+                   str, str_len));
+
+    if ( !rc && (str_len == str_len_param )) {
+        *ex_match = true;
+    }
+    return rc;
+}
+
+param_t*
+find_matching_param (param_t **options, const char *cmd_name){
+    
+    int i = 0,
+         j = 0,
+        choice = -1,
+        leaf_index = -1;
+         
+    bool ex_match = false;
+    
+    memset(array_of_possibilities, 0, POSSIBILITY_ARRAY_SIZE * sizeof(param_t *));
+
+    for (; options[i] && i <= CHILDREN_END_INDEX; i++) {
+
+        if (IS_PARAM_LEAF(options[i])) {
+            leaf_index = i;
+            continue;
+        }
+
+        if (is_cmd_string_match(options[i], cmd_name, &ex_match) == 0) {
+
+            if (ex_match) {
+                 array_of_possibilities[ 0 ] = options[i];
+                 j = 1;
+                break;
+            }
+            array_of_possibilities[ j++ ] = options[i];
+            assert (j < POSSIBILITY_ARRAY_SIZE);
+            continue;
+        }
+    }
+
+    if(leaf_index >= 0 && j == 0)
+        return options[leaf_index];
+
+    if( j == 0)
+        return NULL;
+
+    if(j == 1)
+        return array_of_possibilities[0];
+
+    /* More than one param matched*/
+    printw("%d possibilities :\n", j);
+    for(i = 0; i < j; i++)
+        printw("%-2d. %s\n", i, GET_CMD_NAME(array_of_possibilities[i]));
+
+    printw("Choice [0-%d] : ? ", j-1);
+    scanf("%d", &choice);
+    
+    if(choice < 0 || choice > (j-1)){
+        printw("\nInvalid Choice");
+        return NULL;
+    }
+    return array_of_possibilities[choice];   
+}
+
+/* This fn parse the full command*/
+bool
+cmdtc_parse_full_command (cli_t *cli) {
+
+    int i;
+    int cmd_size;
+    int token_cnt;
+    tlv_struct_t tlv;
+    param_t *param;
+    char** tokens = NULL;
+    cmd_tree_cursor_t *cmdtc;
+
+    cmdtc = cli_get_cmdtc (cli);
+   
+    re_init_tokens(MAX_CMD_TREE_DEPTH);
+
+    unsigned char *cmd = cli_get_user_command(cli, &cmd_size);
+    memcpy (command, cmd, cmd_size);
+
+    tokens = tokenizer(command, ' ', &token_cnt);
+    if (!token_cnt) return false;
+
+    param = cmdtc->root;
+
+    for(i= 0; i < token_cnt; i++){
+
+        param = find_matching_param(&param->options[0], *(tokens +i));
+        if (!param) return false;
+
+        if (IS_PARAM_LEAF(param) &&
+                param->cmd_type.leaf->user_validation_cb_fn) {
+            if (!param->cmd_type.leaf->user_validation_cb_fn (
+                    cmdtc->tlv_buffer, (unsigned char *)*(tokens +i))) {
+                return false;
+            }
+        }
+        push(cmdtc->stack, (void *)param);
+        cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
+    }
+    /* Set the last param which holds the callback*/
+    cmdtc->curr_param = param; 
+    cmd_tree_trigger_cli(cmdtc);
+    return true;
+}

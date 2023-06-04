@@ -4,10 +4,10 @@
 #include <stdbool.h>
 #include "../cli_const.h"
 #include "../gluethread/glthread.h"
+#include "CmdTreeEnums.h"
 
 typedef struct _param_t_ param_t;
 typedef struct serialized_buffer ser_buff_t;
-
 
 typedef int (*user_validation_callback)(ser_buff_t *, unsigned char *leaf_value);
 typedef void (*display_possible_values_callback)(param_t *, ser_buff_t *);
@@ -19,18 +19,13 @@ typedef struct cmd{
     char cmd_name[CMD_NAME_SIZE];
 } cmd_t;
 
-typedef struct leaf{
+typedef struct leaf {
     leaf_type_t leaf_type;
     char value_holder[LEAF_VALUE_HOLDER_SIZE];
     user_validation_callback user_validation_cb_fn;
     char leaf_id[LEAF_ID_SIZE];/*Within a single command, it should be unique*/
 } leaf_t;
 
-typedef enum{
-    CMD,
-    LEAF,
-    NO_CMD
-} param_type_t;
 
 typedef union _param_t{
     cmd_t *cmd;

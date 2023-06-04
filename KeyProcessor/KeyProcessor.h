@@ -6,15 +6,20 @@
 
 typedef struct cli_ cli_t;
 typedef struct cli_history_ cli_history_t;
+typedef struct cmd_tree_cursor_ cmd_tree_cursor_t;
+
+#include "../CmdTree/CmdTreeEnums.h"
 
 void cli_key_processor_init (cli_t **) ;
 
-void cli_key_processor_cleanup ();
-
 void cli_content_reset (cli_t *cli);
+
 void cli_complete_reset (cli_t *cli);
 
 void cli_printsc (cli_t *cli, bool next_line) ;
+
+bool 
+cli_is_char_mode_on () ;
 
 void  cli_start_shell() ;
 
@@ -24,7 +29,11 @@ void cli_set_default_cli (cli_t *cli) ;
 
 void cli_set_hdr (cli_t *cli, unsigned char *new_hdr, uint8_t size);
 
-unsigned char *cli_get_cli_buffer (cli_t *cli);
+unsigned char *cli_get_cli_buffer (cli_t *cli, int *size);
+
+unsigned char *cli_get_user_command (cli_t *cli, int *size);
+
+cmd_tree_cursor_t * cli_get_cmdtc (cli_t *cli) ;
 
 bool
 cli_cursor_is_at_end_of_line (cli_t *cli);
@@ -67,5 +76,8 @@ cli_is_buffer_empty (cli_t *cli);
 
 void
 cli_process_key_interrupt(int ch);
+
+void 
+cli_associate_cmd_tree_cursor (cli_t *cli, cmdtc_cursor_type_t cmdtc_type );
 
 #endif

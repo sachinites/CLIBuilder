@@ -4,12 +4,12 @@
 #include <string.h>
 #include <ncurses.h>
 #include <assert.h>
+#include <stdbool.h>
 
 #include "../cli_const.h"
 #include "KeyProcessor.h"
 #include "CmdTree/CmdTree.h"
 #include "CmdTree/CmdTreeCursor.h"
-
 
 #define ctrl(x)           ((x) & 0x1f)
 
@@ -38,11 +38,69 @@ static cli_t *default_cli = NULL;
 static cli_t *cli_store = NULL;
 static cli_history_t *default_cli_history_list = NULL;
 
+static bool keyp_char_mode = true;
+
+bool 
+cli_is_char_mode_on () {
+
+    return keyp_char_mode ;
+}
+
+static bool
+key_processor_should_enter_line_mode (int key) {
+
+    switch (key) {
+
+        case KEY_HOME:
+        case KEY_END:
+        case KEY_BACKSPACE:
+        case KEY_LEFT:
+        case KEY_RIGHT:
+        case ctrl('n'):
+        case ctrl('w'):
+        case KEY_DC:
+            return true;
+    }
+
+    /* If user attempt to edit the line in the history, enter to line mode immediately*/
+    if (default_cli_history_list->curr_ptr) {
+
+        switch (key) {
+
+            case KEY_ENTER:
+            case KEY_ASCII_NEWLINE:
+                break;
+            default:
+                return true;
+        }
+    }
+    return false;
+}
+
 static int
 cli_application_process (cli_t *cli) {
 
-    if (cli_is_buffer_empty (cli)) return -1;
-    return 0;
+    int ret = -1;
+    bool parse_rc = true;
+
+    if (cli_is_char_mode_on ()) {
+
+        cmd_tree_process_carriage_return_key(cli->cmdtc);
+        /* Record the cmd only if the application returned success*/
+        if (1 || cmdtc_get_cmd_trigger_status (cli->cmdtc)) ret = 0;
+    }
+    else {
+
+         parse_rc = cmdtc_parse_full_command(cli);
+         if (parse_rc &&         /* if the cmd syntactically has been parsed successfully in line mode*/
+            default_cli_history_list->curr_ptr == NULL &&     /* if it is not a historical cmd*/
+            (1 || cmdtc_get_cmd_trigger_status (cli->cmdtc))) { /* Ithe application returned success*/
+        
+            ret = 0;
+        }
+    }
+
+    return ret;
 }
 
 static bool
@@ -92,8 +150,11 @@ cli_key_processor_init (cli_t **cli) {
     default_cli = *cli;
 
     cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, (uint8_t) strlen (DEF_CLI_HDR));
-    cmd_tree_cursor_init (&default_cli->cmdtc);
+
     cmd_tree_init ();
+
+    cli_associate_cmd_tree_cursor (default_cli, cmdtc_type_cbc);
+
     default_cli_history_list = (cli_history_t *)calloc (1, sizeof (cli_history_t));
     default_cli_history_list->curr_ptr = NULL;
 
@@ -103,28 +164,6 @@ cli_key_processor_init (cli_t **cli) {
     cbreak();         // Disable line buffering
     noecho();        // Disable character echoing
     refresh();        // Update the screen
-}
-
-void
-cli_key_processor_cleanup () {
-
-    cli_t *cli;
-
-    cmd_tree_cursor_deinit (default_cli->cmdtc);
-    free(default_cli->cmdtc);
-    free(default_cli);
-
-    default_cli = NULL;
-
-    while ((cli = default_cli_history_list->cli_history_list)) {
-
-        default_cli_history_list->cli_history_list = cli->next;
-        assert(!cli->cmdtc);
-        free(cli);
-    }
-    free( default_cli_history_list);
-    default_cli_history_list = NULL;
-    endwin();
 }
 
 void
@@ -149,9 +188,27 @@ cli_complete_reset (cli_t *cli) {
     cli->next = cli_next;
 }
 
-unsigned char *cli_get_cli_buffer (cli_t *cli) {
+unsigned char *
+cli_get_cli_buffer (cli_t *cli, int *size) {
 
+    if (size) {
+        *size = (cli->end_pos - cli->start_pos);
+    }
     return cli->clibuff;
+}
+
+unsigned char *
+cli_get_user_command (cli_t *cli, int *size) {
+
+    unsigned char *cmd = &cli->clibuff[cli->start_pos];
+    *size = cli->end_pos - cli->start_pos;
+    return cmd;
+}
+
+cmd_tree_cursor_t * 
+cli_get_cmdtc (cli_t *cli) {
+
+    return cli->cmdtc;
 }
 
 void cli_printsc (cli_t *cli, bool next_line) {
@@ -231,6 +288,12 @@ bool
 cli_cursor_is_at_begin_of_line (cli_t *cli) {
 
     return (cli->current_pos == cli->start_pos);
+}
+
+void 
+cli_associate_cmd_tree_cursor (cli_t *cli, cmdtc_cursor_type_t cmdtc_type ) {
+
+    cli->cmdtc = cmd_tree_get_cursor (cmdtc_type);
 }
 
 void 
@@ -316,15 +379,6 @@ cli_process_key_interrupt(int ch)
         default_cli->end_pos = default_cli->current_pos;
         move(default_cli->row_store, default_cli->col_store);
         break;
-    case ctrl('w'):
-        /* ToDo : Delete the current Word */
-        break;
-    case '?':
-            cmdtc_process_question_mark(default_cli->cmdtc);
-        break;
-    case '/':
-            cmd_tree_enter_mode (default_cli->cmdtc);
-        break;
     case ctrl('l'):
         clear();
         cli_printsc(default_cli, true);
@@ -398,11 +452,9 @@ cli_process_key_interrupt(int ch)
        
         if (default_cli_history_list->curr_ptr == NULL)
         {
-            cmd_tree_process_carriage_return_key(default_cli->cmdtc);
             cli_screen_cursor_save_screen_pos(default_cli);
             move(default_cli->row_store, default_cli->end_pos);
-            if (!cli_application_process(default_cli))
-            {
+            if (!cli_application_process(default_cli)) {
                 cli_record_copy(default_cli_history_list, default_cli);
             }
             cli_content_reset(default_cli);
@@ -410,10 +462,11 @@ cli_process_key_interrupt(int ch)
         }
         else
         {
-             /* Do not entertain enter key if user has not typed a complete word*/
             cli_screen_cursor_save_screen_pos(default_cli);
             move(default_cli->row_store, default_cli->end_pos);
-            cli_application_process(default_cli);
+            if (!cli_application_process(default_cli)) {
+                cli_record_copy(default_cli_history_list, default_cli);
+            }
             assert(cli_store);
             default_cli = cli_store;
             cli_store = NULL;
@@ -421,9 +474,8 @@ cli_process_key_interrupt(int ch)
             cli_printsc(default_cli, true);
             default_cli_history_list->curr_ptr = NULL;
         }
-        break;
-    case KEY_ASCII_TAB:
-        cli_debug_print_stats(default_cli);
+        keyp_char_mode = true;
+        default_cli->cmdtc = cmd_tree_get_cursor (cmdtc_type_cbc);
         break;
     case KEY_RIGHT:
         if (default_cli->current_pos == default_cli->end_pos)
@@ -445,6 +497,11 @@ cli_process_key_interrupt(int ch)
         }
         else
         {
+            /* We have hit the ceiling in the history, block the user
+                KEY UP strokes now*/
+            if (!default_cli_history_list->curr_ptr->next) {
+                break;
+            }
             default_cli_history_list->curr_ptr =
                 default_cli_history_list->curr_ptr->next;
         }
@@ -459,8 +516,7 @@ cli_process_key_interrupt(int ch)
         break;
     case KEY_DOWN:
         cli_screen_cursor_save_screen_pos(default_cli);
-        if (default_cli_history_list->curr_ptr == NULL)
-        {
+        if (default_cli_history_list->curr_ptr == NULL) {
             break;
         }
         else
@@ -468,8 +524,16 @@ cli_process_key_interrupt(int ch)
             default_cli_history_list->curr_ptr =
                 default_cli_history_list->curr_ptr->prev;
         }
-        if (default_cli_history_list->curr_ptr == NULL)
+        if (default_cli_history_list->curr_ptr == NULL) {
+            /* Load the current default cli that was being typed by the user*/
+            default_cli = cli_store;
+            cli_store = NULL;
+            deleteln();
+            move(default_cli->row_store, 0);
+            cli_printsc(default_cli, false);
+            move(default_cli->row_store, default_cli->current_pos);
             break;
+        }
         deleteln();
         move(default_cli->row_store, 0);
         cli_printsc(default_cli_history_list->curr_ptr, false);
@@ -478,6 +542,7 @@ cli_process_key_interrupt(int ch)
         default_cli = default_cli_history_list->curr_ptr;
         break;
     case ' ':
+    case KEY_ASCII_TAB:
         rc = cmdt_cursor_parse_next_char(default_cli->cmdtc, ch);
         switch (rc) {
             case cmdt_cursor_ok:
@@ -523,6 +588,22 @@ cli_process_key_interrupt(int ch)
                 break;
         }
         break;
+    /* Put all the probable fall-through to default cases here*/
+    case '?':
+            if (cli_is_char_mode_on()) {
+                cmdtc_process_question_mark(default_cli->cmdtc);
+                break;
+            }
+    case '/':
+            if (cli_is_char_mode_on()) {
+                cmd_tree_enter_mode (default_cli->cmdtc);
+                break;
+            }    
+    case '.':
+            if (cli_is_char_mode_on()) {
+                // ToDO : auto-complete all possible CLIs here
+                break;
+            } 
     default:
         if (default_cli->cnt == MAX_COMMAND_LENGTH)
             break;
@@ -574,8 +655,19 @@ cli_start_shell () {
 
     while (true) {
         ch = getch();
+
+        if (keyp_char_mode) {
+
+            if (key_processor_should_enter_line_mode (ch)) {
+                keyp_char_mode = false;
+                /* Reset the cmd tree cbc cursor to be used for next command now afresh*/
+                cmd_tree_cursor_reset_for_nxt_cmd (default_cli->cmdtc);
+                /* Assign a wbw cursor to the CLI now*/
+                default_cli->cmdtc = cmd_tree_get_cursor (cmdtc_type_wbw);
+                /* Make the new cursor ready to be used afresh*/
+                cmd_tree_cursor_reset_for_nxt_cmd (default_cli->cmdtc);
+            }
+        }
         cli_process_key_interrupt ((int)ch);
     }
-
-   cli_key_processor_cleanup () ;
 }

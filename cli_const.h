@@ -15,7 +15,7 @@
 #define CHILDREN_START_INDEX    0
 #define CHILDREN_END_INDEX      (MAX_OPTION_SIZE -1)
 #define TLV_MAX_BUFFER_SIZE     1024
-
+#define POSSIBILITY_ARRAY_SIZE  10
 
 
 #define KEY_ASCII_TAB   9
@@ -32,7 +32,7 @@ typedef enum{
     MODE_UNKNOWN
 } op_mode;
 
-typedef enum{
+typedef enum leaf_type_{
     INT,
     STRING,
     IPV4,

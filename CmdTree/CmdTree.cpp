@@ -161,7 +161,7 @@ cmd_tree_init () {
 
     init_token_array();
     libcli_build_default_cmdtree();
-    cmd_tree_default_cursor_init () ;
+    cmd_tree_init_cursors () ;
 }
 
 /* Function to be used to get access to above hooks*/

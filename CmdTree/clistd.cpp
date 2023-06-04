@@ -8,7 +8,7 @@ int
 config_device_default_handler (param_t *param, ser_buff_t *ser_buff, op_mode enable_or_disable) {
 
     tlv_struct_t *tlv = NULL;
-
+    
     TLV_LOOP_BEGIN(ser_buff, tlv){
 
         if(enable_or_disable == CONFIG_ENABLE) {
