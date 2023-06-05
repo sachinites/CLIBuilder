@@ -51,38 +51,35 @@ init_param(param_t *param,
         GET_PARAM_CMD(param) = (cmd_t *)calloc(1, sizeof(cmd_t));
         param->param_type = CMD;
         strncpy((char *)GET_CMD_NAME(param), cmd_name, MIN(CMD_NAME_SIZE, strlen(cmd_name)));
-        GET_CMD_NAME(param)
-        [CMD_NAME_SIZE - 1] = '\0';
-    }   
+        GET_CMD_NAME(param)[CMD_NAME_SIZE - 1] = '\0';
+        GET_PARAM_CMD(param)->len = strlen (GET_CMD_NAME(param));
+    }
     else if (param_type == LEAF)
-    {   
+    {
         GET_PARAM_LEAF(param) = (leaf_t *)calloc(1, sizeof(leaf_t));
         param->param_type = LEAF;
         GET_PARAM_LEAF(param)->leaf_type = leaf_type;
         param->cmd_type.leaf->user_validation_cb_fn = user_validation_cb_fn;
         strncpy((char *)GET_LEAF_ID(param), leaf_id, MIN(LEAF_ID_SIZE, strlen(leaf_id)));
-        GET_LEAF_ID(param)
-        [LEAF_ID_SIZE - 1] = '\0';
-    }   
+        GET_LEAF_ID(param)[LEAF_ID_SIZE - 1] = '\0';
+    }
     else if (param_type == NO_CMD)
     {   
         GET_PARAM_CMD(param) = (cmd_t *)calloc(1, sizeof(cmd_t));
         param->param_type = NO_CMD;
         memcpy(GET_CMD_NAME(param), NEGATE_CHARACTER, strlen(NEGATE_CHARACTER));
-        GET_CMD_NAME(param)
-        [CMD_NAME_SIZE - 1] = '\0';
-    }   
+        GET_CMD_NAME(param)[CMD_NAME_SIZE - 1] = '\0';
+    }
 
     param->callback = callback;
 
     strncpy(GET_PARAM_HELP_STRING(param), help, MIN(PARAM_HELP_STRING_SIZE, strlen(help)));
-    GET_PARAM_HELP_STRING(param)
-    [PARAM_HELP_STRING_SIZE - 1] = '\0';
+    GET_PARAM_HELP_STRING(param)[PARAM_HELP_STRING_SIZE - 1] = '\0';
     param->disp_callback = NULL;
 
     for (; i < MAX_OPTION_SIZE; i++) {   
         param->options[i] = NULL;
-    }   
+    }
 
     param->CMDCODE = -1;
 }

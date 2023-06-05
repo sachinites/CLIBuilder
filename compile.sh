@@ -8,5 +8,7 @@ g++ -g -c -I . CmdTree/CmdTreeCursor.cpp -o CmdTree/CmdTreeCursor.o
 g++ -g -c -I . gluethread/glthread.c -o gluethread/glthread.o
 g++ -g -c -I . app.cpp -o app.o
 g++ -g -c -I . main4.c -o main4.o
+g++ -g -c -I . testapp.c -o testapp.o -fpermissive
 g++ -g app.o string_util.o serializer/serialize.o  stack/stack.o KeyProcessor/KeyProcessor.o CmdTree/CmdTree.o CmdTree/clistd.o gluethread/glthread.o CmdTree/CmdTreeCursor.o -o exe -lncurses
 g++ -g main4.o string_util.o serializer/serialize.o  stack/stack.o KeyProcessor/KeyProcessor.o CmdTree/CmdTree.o CmdTree/clistd.o gluethread/glthread.o CmdTree/CmdTreeCursor.o -o main4.exe -lncurses
+g++ -g testapp.o string_util.o serializer/serialize.o  stack/stack.o KeyProcessor/KeyProcessor.o CmdTree/CmdTree.o CmdTree/clistd.o gluethread/glthread.o CmdTree/CmdTreeCursor.o -o testapp.exe -lncurses

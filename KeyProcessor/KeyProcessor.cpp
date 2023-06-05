@@ -46,6 +46,10 @@ cli_is_char_mode_on () {
     return keyp_char_mode ;
 }
 
+#define MODE_MSG_DISPLAY    \
+    cli_screen_bottom_msg_display ( \
+                (unsigned char *) (cli_is_char_mode_on() ? "Char-Mode" : "Line-Mode"), 0, false)
+
 static bool
 key_processor_should_enter_line_mode (int key) {
 
@@ -87,7 +91,7 @@ cli_application_process (cli_t *cli) {
     bool parse_rc = true;
 
     if (cli_is_buffer_empty (cli)) return -1;
-    
+
     if (cli_is_char_mode_on ()) {
 
         cmd_tree_process_carriage_return_key(cli->cmdtc);
@@ -157,8 +161,7 @@ cli_key_processor_init (cli_t **cli) {
     cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, (uint8_t) strlen (DEF_CLI_HDR));
 
     cmd_tree_init ();
-
-    cli_associate_cmd_tree_cursor (default_cli, cmdtc_type_cbc);
+    default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_cbc);
 
     default_cli_history_list = (cli_history_t *)calloc (1, sizeof (cli_history_t));
     default_cli_history_list->curr_ptr = NULL;
@@ -187,7 +190,7 @@ cli_complete_reset (cli_t *cli) {
     cli_t *cli_prev = cli->prev;
     cli_t *cli_next = cli->next;
 
-    memset (cli, 0, sizeof (sizeof (cli_t)));
+    memset (cli, 0, sizeof (cli_t));
     cli->cmdtc = cmdtc;
     cli->prev = cli_prev;
     cli->next = cli_next;
@@ -296,12 +299,6 @@ cli_cursor_is_at_begin_of_line (cli_t *cli) {
 }
 
 void 
-cli_associate_cmd_tree_cursor (cli_t *cli, cmdtc_cursor_type_t cmdtc_type ) {
-
-    cli->cmdtc = cmd_tree_get_cursor (cmdtc_type);
-}
-
-void 
 cli_content_shift_right (cli_t *cli) {
 
     int i;
@@ -364,6 +361,16 @@ cli_screen_enable_timestamp (cli_t *cli) {
 }
 
 void
+cli_screen_bottom_msg_display (unsigned char *msg, int msg_size, bool display) {
+
+    int row, col;
+    getyx(stdscr, row, col);
+    move (0, 0);
+    printw ("%s", msg);
+    move(row, col);
+}
+
+void
 cli_process_key_interrupt(int ch)
 {
     int i;
@@ -371,6 +378,25 @@ cli_process_key_interrupt(int ch)
 
     switch (ch)
     {
+    case ctrl('t'): // goto apex
+        /* Come out of history browsing*/
+        if (cli_store) {
+            cmdtc_reset_cursor (default_cli->cmdtc);
+            default_cli = cli_store;
+            cli_store = NULL;
+            default_cli_history_list->curr_ptr = NULL;
+        }
+        cli_complete_reset(default_cli);
+        cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, strlen (DEF_CLI_HDR));
+        cli_screen_cursor_reset_current_line();
+        cli_printsc (default_cli, false);
+        /* Come out of line-mode if working in that mode*/
+        keyp_char_mode = true;
+        MODE_MSG_DISPLAY;
+        default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_cbc);
+        /* Reset the cursor to point to apex-root*/
+        cmdtc_reset_cursor (default_cli->cmdtc);
+        break;
     case ctrl('n'):
         if (cli_cursor_is_at_end_of_line(default_cli))
             break;
@@ -387,6 +413,7 @@ cli_process_key_interrupt(int ch)
     case ctrl('l'):
         clear();
         cli_printsc(default_cli, true);
+        MODE_MSG_DISPLAY;
         break;
     case KEY_HOME: /* Inbuilt , provided by ncurses */
         if (cli_cursor_is_at_begin_of_line(default_cli))
@@ -472,7 +499,7 @@ cli_process_key_interrupt(int ch)
             cli_screen_cursor_save_screen_pos(default_cli);
             move(default_cli->row_store, default_cli->end_pos);
             assert(!default_cli->cmdtc);
-            default_cli->cmdtc = cmd_tree_get_cursor (cmdtc_type_wbw);
+            default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
             if (!cli_application_process(default_cli)) {
                 cli_record_copy(default_cli_history_list, default_cli);
             }
@@ -485,7 +512,8 @@ cli_process_key_interrupt(int ch)
             default_cli_history_list->curr_ptr = NULL;
         }
         keyp_char_mode = true;
-        default_cli->cmdtc = cmd_tree_get_cursor (cmdtc_type_cbc);
+        MODE_MSG_DISPLAY;
+        default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_cbc);
         break;
     case KEY_RIGHT:
         if (default_cli->current_pos == default_cli->end_pos)
@@ -551,7 +579,7 @@ cli_process_key_interrupt(int ch)
             cli_store = default_cli;
         default_cli = default_cli_history_list->curr_ptr;
         break;
-    case ' ':
+    case KEY_ASCII_SPACE:
     case KEY_ASCII_TAB:
         rc = cmdt_cursor_parse_next_char(default_cli->cmdtc, ch);
         switch (rc) {
@@ -669,11 +697,13 @@ cli_start_shell () {
                 /* Reset the cmd tree cbc cursor to be used for next command now afresh*/
                 cmd_tree_cursor_reset_for_nxt_cmd (default_cli->cmdtc);
                 /* Assign a wbw cursor to the CLI now*/
-                default_cli->cmdtc = cmd_tree_get_cursor (cmdtc_type_wbw);
+                default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
                 /* Make the new cursor ready to be used afresh*/
                 cmd_tree_cursor_reset_for_nxt_cmd (default_cli->cmdtc);
             }
         }
+        MODE_MSG_DISPLAY;
         cli_process_key_interrupt ((int)ch);
     }
 }
+

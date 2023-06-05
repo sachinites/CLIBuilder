@@ -20,7 +20,7 @@ bool
 cmdtc_get_cmd_trigger_status (cmd_tree_cursor_t *cmdtc);
 
 cmd_tree_cursor_t *
-cmd_tree_get_cursor (cmdtc_cursor_type_t cmdtc_type);
+cmdtc_tree_get_cursor (cmdtc_cursor_type_t cmdtc_type);
 
 cmdtc_cursor_type_t
 cmdtc_get_type (cmd_tree_cursor_t *cmdtc);
@@ -37,9 +37,6 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc);
 void
 cmdtc_show_complete_clis (cmd_tree_cursor_t *cmdtc);
 
-bool 
-cndtc_is_cursor_at_leaf_node (cmd_tree_cursor_t *cmdtc);
-
 void 
 cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) ;
 
@@ -54,5 +51,8 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) ;
 
 void 
 cmd_tree_post_cli_trigger (cli_t *cli);
+
+void 
+cmdtc_reset_cursor (cmd_tree_cursor_t *cmdtc);
 
 #endif 

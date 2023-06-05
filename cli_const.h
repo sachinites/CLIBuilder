@@ -20,6 +20,8 @@
 #define KEY_BACKSPACE_MOBAXTERM 8 /* I found, in MobaXterm on Windows, BS has ascii of 8*/
 #define KEY_ASCII_TAB   9
 #define KEY_ASCII_NEWLINE 10
+#define KEY_ASCII_SPACE   32
+
 #define CLI_HISTORY_LIMIT   10
 
 #define NEGATE_CHARACTER "no"

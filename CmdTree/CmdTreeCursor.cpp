@@ -66,7 +66,7 @@ cmd_tree_init_cursors () {
 }
 
 cmd_tree_cursor_t *
-cmd_tree_get_cursor (cmdtc_cursor_type_t cmdtc_type) {
+cmdtc_tree_get_cursor (cmdtc_cursor_type_t cmdtc_type) {
 
     switch (cmdtc_type) {
 
@@ -91,12 +91,21 @@ cmdtc_get_type (cmd_tree_cursor_t *cmdtc) {
 }
 
 void 
+cmdtc_reset_cursor (cmd_tree_cursor_t *cmdtc) {
+
+    cmd_tree_cursor_deinit (cmdtc);
+    cmdtc->root = libcli_get_root_hook();
+    cmdtc->curr_param = cmdtc->root;
+}
+
+void 
 cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
 
     glthread_t *curr;
     reset_stack (cmdtc->stack);
     cmdtc->stack_checkpoint = -1;
     reset_serialize_buffer (cmdtc->tlv_buffer);
+    cmdtc->root = NULL;
     cmdtc->curr_param = NULL;
     cmdtc->icursor = 0;
     cmdtc->cmdtc_state = cmdt_cur_state_init;
@@ -131,7 +140,7 @@ cmdtc_filter_word_by_word_size (glthread_t *param_list, int len) {
     glthread_t *curr;
     param_t *param;
     glthread_t temp_list;
-    char *param_word;
+   int param_word_len;
 
     count = 0;
     param = NULL;
@@ -140,8 +149,8 @@ cmdtc_filter_word_by_word_size (glthread_t *param_list, int len) {
     ITERATE_GLTHREAD_BEGIN (param_list, curr) {
 
         param = glue_to_param (curr);
-        param_word = GET_CMD_NAME(param);
-        if (strlen (param_word) != len ) {
+        param_word_len = GET_PARAM_CMD(param)->len;
+        if (param_word_len != len ) {
             remove_glthread (curr);
             glthread_add_next (&temp_list, curr);
         }
@@ -162,6 +171,43 @@ cmdtc_filter_word_by_word_size (glthread_t *param_list, int len) {
     return NULL;
 }
 
+/* This fn finds how many intial characters are common in all keywords present in
+     cmdtc->matching_params_list starting from index start_index. This fn is READ-only fn */
+static int
+cmdtc_find_common_intial_lcs_len (glthread_t *param_list, int start_index) {
+
+    int len, j;
+    int count;
+    param_t *param;
+    param_t *fparam;
+    glthread_t *curr;
+    unsigned char ch, ch2;
+
+    if (IS_GLTHREAD_LIST_EMPTY (param_list)) return 0;
+
+    count = 0;
+    fparam = glue_to_param (glthread_get_next (param_list));
+    j = start_index;
+
+    while(true) {
+
+        ch = (unsigned char) GET_CMD_NAME (fparam)[j];
+
+        ITERATE_GLTHREAD_BEGIN (param_list , curr) {
+
+            param = glue_to_param (curr);
+            ch2 =  (unsigned char) GET_CMD_NAME (param)[j];
+            if (ch == ch2) continue;
+            return count;
+
+        } ITERATE_GLTHREAD_END (param_list , curr)
+        
+        count++;
+        j++;
+    }
+
+    return count;
+}
 
 static int
 cmdtc_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, bool wildcard) {
@@ -277,7 +323,8 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) ;
 cmdt_cursor_op_res_t
 cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
-    int i, mcount;
+    int len;
+    int  mcount;
     tlv_struct_t tlv;
     glthread_t *curr;
     param_t *param;
@@ -297,22 +344,38 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                         the state change and block user cursor*/
                     cmdt_cursor_display_options (cmdtc);
                     cmdtc->leaf_param = NULL;
-                    while (dequeue_glthread_first(&cmdtc->matching_params_list)) ;
                     return cmdt_cursor_no_match_further;
                 }
             }
 
             else if (mcount >1 ) {
 
+                if (0 && cmdtc->leaf_param) {
+                    cmdt_cursor_display_options (cmdtc);
+                    cmdtc->leaf_param = NULL;
+                    while (dequeue_glthread_first(&cmdtc->matching_params_list)) ;
+                    return cmdt_cursor_no_match_further;
+                }
+
+                /* We are here when user pressed ' ' and there are multiple matching params, and 
+                    no leaf at this level. Auto-complete to the matching point amoing all params here*/
+                len = cmdtc_find_common_intial_lcs_len (&cmdtc->matching_params_list, 0);
+
+                /* Take any param from the list*/
+                param = glue_to_param (glthread_get_next (&cmdtc->matching_params_list));
+
+                /* Perform Auto - Complete*/
+                while (cmdtc->icursor != len) {
+                    cli_process_key_interrupt (
+                        (int)GET_CMD_NAME(param)[cmdtc->icursor]);
+                }
                 cmdt_cursor_display_options (cmdtc);
-                cmdtc->leaf_param = NULL;
-                while (dequeue_glthread_first(&cmdtc->matching_params_list)) ;
                 return cmdt_cursor_no_match_further;
             }
 
             else if (mcount == 1) {
 
-                if (cmdtc->leaf_param) {
+                if (0 && cmdtc->leaf_param) {
                     
                     cmdt_cursor_display_options (cmdtc);
                     /* Leaf is available at this level, user just cant type ' '. Undo
@@ -325,6 +388,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                 cmdtc->cmdtc_state = cmdt_cur_state_single_word_match;
                 cmdtc->curr_param = glue_to_param (glthread_get_next (&cmdtc->matching_params_list));
                 
+                 /* Perform Auto - Complete*/
                 while (GET_CMD_NAME(cmdtc->curr_param)[cmdtc->icursor] != '\0') {
                     cli_process_key_interrupt (
                         (int)GET_CMD_NAME(cmdtc->curr_param)[cmdtc->icursor]);
@@ -335,8 +399,16 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
         break;
 
+
+
         case cmdt_cur_state_multiple_matches:
-            /* User must not type space if there are more multiple matches*/
+
+            /* If there exist leaf on this level and user press ' ', but there are keywords matching
+                with the word types so far, allow the user to continue input to the point until he type enough to enter cmdt_cur_state_matching_leaf state */
+            if (0 && cmdtc->leaf_param) {
+                cmdt_cursor_display_options (cmdtc);
+                return  cmdt_cursor_no_match_further;;
+            }
 
             /* Could be possible that user has fully typed-out the word and now pressed
                  the space. But there are other words which satisfies the match criteria. For example,
@@ -349,13 +421,23 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
             */
             param = cmdtc_filter_word_by_word_size 
                             (&cmdtc->matching_params_list, cmdtc->icursor);
-            if (!param) {
-                cmdt_cursor_display_options (cmdtc);
-                return cmdt_cursor_no_match_further;
+
+            if (param) {
+                cmdtc->curr_param = param;
+                cmd_tree_cursor_move_to_next_level (cmdtc);
+                return cmdt_cursor_ok;
             }
-            cmdtc->curr_param = param;
-            cmd_tree_cursor_move_to_next_level (cmdtc);
-            return cmdt_cursor_ok;
+
+            /* Do auto completion until the tie point amonst several matching key-words*/
+            len = cmdtc_find_common_intial_lcs_len (&cmdtc->matching_params_list, cmdtc->icursor);
+            param = glue_to_param (glthread_get_next (&cmdtc->matching_params_list));
+            while (len--) {
+                cli_process_key_interrupt (
+                        (int)GET_CMD_NAME(param)[cmdtc->icursor]);
+            }
+            return cmdt_cursor_no_match_further;
+
+
 
         case cmdt_cur_state_single_word_match:
             /* only one option is matching and that is fixed word , do auto-completion*/
@@ -367,10 +449,15 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
             cmd_tree_cursor_move_to_next_level (cmdtc);
             return cmdt_cursor_done_auto_completion;
 
+
+
         case cmdt_cur_state_matching_leaf:
             /* User has typed ' ' while inputting the value of leaf. Go to next level*/
             cmd_tree_cursor_move_to_next_level (cmdtc);
             return cmdt_cursor_ok;
+
+
+
         case cmdt_cur_state_no_match:
             /* We cant reach here*/
             assert(0);
@@ -391,7 +478,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
         return cmdt_cursor_ok;
     }
 
-    if (c == ' ' || c == KEY_ASCII_TAB) {
+    if ((c == KEY_ASCII_SPACE) || (c == KEY_ASCII_TAB)) {
 
         return cmdt_cursor_process_space (cmdtc);
     }
@@ -756,7 +843,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
     cmdtc->tlv_buffer->next = tlv_buffer_original_size;
 }
 
-void 
+void
 cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
 
     cli_t *cli = cli_get_default_cli();
@@ -816,7 +903,7 @@ is_cmd_string_match(param_t *param, const char *str, bool *ex_match){
     
     *ex_match = false;
     int str_len = strlen(str);
-    int str_len_param = strlen(param->cmd_type.cmd->cmd_name);
+    int str_len_param = param->cmd_type.cmd->len;
 
     int rc =  (strncmp(param->cmd_type.cmd->cmd_name, 
                    str, str_len));

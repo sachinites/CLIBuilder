@@ -17,6 +17,7 @@ typedef int (*cmd_callback)(param_t *param,
 
 typedef struct cmd{
     char cmd_name[CMD_NAME_SIZE];
+    int len;
 } cmd_t;
 
 typedef struct leaf {

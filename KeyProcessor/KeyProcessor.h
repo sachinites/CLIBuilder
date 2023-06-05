@@ -51,9 +51,6 @@ void
 cli_record_copy (cli_history_t *cli_history, cli_t *new_cli);
 
 void
-cli_screen_cusor_reset_current_line ();
-
-void
 cli_screen_cursor_move_next_line ();
 
 void 
@@ -77,7 +74,7 @@ cli_is_buffer_empty (cli_t *cli);
 void
 cli_process_key_interrupt(int ch);
 
-void 
-cli_associate_cmd_tree_cursor (cli_t *cli, cmdtc_cursor_type_t cmdtc_type );
+void
+cli_screen_bottom_msg_display (unsigned char *msg, int msg_size, bool display);
 
 #endif

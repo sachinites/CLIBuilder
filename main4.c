@@ -101,6 +101,15 @@ main(int argc, char **argv){
                 }
             }
            
+           {
+                /* show node H2 <table-name>*/
+                static param_t table_name;
+                init_param(&table_name,
+                                 LEAF,
+                                 0,0,0,STRING,"table-type", "table type");
+                 libcli_register_param(&node_name, &table_name);
+           }
+
             {
                 /*show node <node-name> loopback*/ 
                 static param_t loopback;    /*Get the param_t variable, either a static memory or heap memory, not stack memory*/
