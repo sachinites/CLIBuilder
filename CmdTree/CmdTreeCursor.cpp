@@ -126,6 +126,63 @@ cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
     cmdtc->leaf_param = NULL;
 }
 
+int
+cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoint)  {
+
+    int count = 0;
+
+    assert (cmdtc->cmdtc_type == cmdtc_type_cbc);
+
+    switch (cmdtc->cmdtc_state) {
+        case cmdt_cur_state_init:
+            if (cmdtc->curr_param == libcli_get_root_hook()) return 0;
+            assert (cmdtc->curr_param == (param_t *)getTopElem(cmdtc->stack));
+            if (honor_checkpoint) {
+                if (cmdtc->stack_checkpoint == cmdtc->stack->top) return 0; 
+            }
+            pop(cmdtc->stack);
+            count = IS_PARAM_CMD (cmdtc->curr_param) ? \
+                            cmdtc->curr_param->cmd_type.cmd->len : \
+                            strlen(GET_LEAF_VALUE_PTR(cmdtc->curr_param));
+            count += 1;
+            cmdtc->curr_param = (isStackEmpty (cmdtc->stack)) ?  \
+                libcli_get_root_hook() : (param_t *)getTopElem(cmdtc->stack);
+            serialize_buffer_skip (cmdtc->tlv_buffer, -1 * sizeof (tlv_struct_t));
+        break;
+        case cmdt_cur_state_multiple_matches:
+            if (cmdtc->leaf_param) {
+                memset (GET_LEAF_VALUE_PTR(cmdtc->leaf_param), 0, cmdtc->icursor);
+                cmdtc->leaf_param = NULL;
+            }
+            while (dequeue_glthread_first(&cmdtc->matching_params_list));
+            count = cmdtc->icursor ;
+            cmdtc->icursor = 0;
+            cmdtc->cmdtc_state =  cmdt_cur_state_init;
+            break;        
+        case cmdt_cur_state_single_word_match:       
+        case cmdt_cur_state_matching_leaf:
+            if (cmdtc->leaf_param) {
+                memset (GET_LEAF_VALUE_PTR(cmdtc->leaf_param), 0, cmdtc->icursor);
+                cmdtc->leaf_param = NULL;
+            }
+            while (dequeue_glthread_first(&cmdtc->matching_params_list));
+            count = cmdtc->icursor ;
+            cmdtc->icursor = 0;
+            cmdtc->cmdtc_state =  cmdt_cur_state_init;
+            if (isStackEmpty (cmdtc->stack)) {
+                cmdtc->curr_param = libcli_get_root_hook();
+                break;
+            }
+            assert (cmdtc->curr_param != (param_t *)getTopElem(cmdtc->stack));
+            cmdtc->curr_param = (param_t *)getTopElem(cmdtc->stack);           
+            break;
+        case cmdt_cur_state_no_match:
+            assert(0);
+        default: ;
+    }
+    return count;
+}
+
 /* This fn removes all the params from the params list whose len is not
         equal to 'len' provided that after removal there should be exactly one
         param left in this list. Return this param.
@@ -316,11 +373,7 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
     move (row, col1);
 }
 
-
-static  cmdt_cursor_op_res_t
-cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) ;
-
-cmdt_cursor_op_res_t
+static cmdt_cursor_op_res_t
 cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
     int len;

@@ -28,6 +28,9 @@ cmdtc_get_type (cmd_tree_cursor_t *cmdtc);
 void 
 cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) ;
 
+int
+cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoint) ;
+
 void 
 cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc);
 

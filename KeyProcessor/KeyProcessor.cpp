@@ -57,7 +57,6 @@ key_processor_should_enter_line_mode (int key) {
 
         case KEY_HOME:
         case KEY_END:
-        case KEY_BACKSPACE:
         case KEY_LEFT:
         case KEY_RIGHT:
         case ctrl('n'):
@@ -433,6 +432,21 @@ cli_process_key_interrupt(int ch)
         if (default_cli->current_pos == default_cli->start_pos)
             break;
 
+        if (cli_is_char_mode_on ()) {
+            /* in Char mode we are always at the end of line*/
+            int bs_count = cmd_tree_cursor_move_one_level_up (default_cli->cmdtc, true);
+            if (bs_count) {
+                cli_screen_cursor_move_cursor_left (bs_count, true);
+                while (bs_count--) {
+                    default_cli->clibuff[--default_cli->end_pos] = '\0';
+                    default_cli->cnt--;
+                    default_cli->current_pos--;
+                }
+            }
+            break;
+        }
+
+        /* If we are in line mode */
         /* Case 2 : if we are at the end of line*/
         else if (default_cli->current_pos == default_cli->end_pos)
         {
@@ -579,8 +593,8 @@ cli_process_key_interrupt(int ch)
             cli_store = default_cli;
         default_cli = default_cli_history_list->curr_ptr;
         break;
-    case KEY_ASCII_SPACE:
     case KEY_ASCII_TAB:
+    case KEY_ASCII_SPACE:
         rc = cmdt_cursor_parse_next_char(default_cli->cmdtc, ch);
         switch (rc) {
             case cmdt_cursor_ok:
