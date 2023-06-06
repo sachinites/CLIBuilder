@@ -79,10 +79,23 @@ typedef enum{
     VALIDATION_SUCCESS
 } CLI_VAL_RC;
 
+#define MODE_CHARACTER  '/'
+#define SUBOPTIONS_CHARACTER '?'
+#define CMD_EXPANSION_CHARACTER '.'
+#define NEGATE_CHARACTER "no"
+
 
 /* Reserved TLV Types */
 #define TLV_TYPE_NORMAL    0           /* Normal TLVs which store user CLI values */
 #define TLV_TYPE_CMD_NAME    255  /* TLVs which store CMD params name*/
 #define TLV_TYPE_NEGATE    254          /* 'no' keyword */
+
+
+/* Ncurses Color indexes */
+#define GRASS_PAIR     1
+#define WATER_PAIR     2
+#define MOUNTAIN_PAIR  3
+#define PLAYER_PAIR    4
+
 
 #endif 

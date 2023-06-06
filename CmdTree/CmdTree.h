@@ -86,4 +86,7 @@ cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char, int index);
 void 
 cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff);
 
+void
+cmd_tree_display_all_complete_commands(param_t *root, unsigned int index);
+
 #endif 

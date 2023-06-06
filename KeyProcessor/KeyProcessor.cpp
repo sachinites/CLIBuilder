@@ -196,6 +196,14 @@ cli_key_processor_init () {
     cbreak();         // Disable line buffering
     noecho();        // Disable character echoing
     refresh();        // Update the screen
+    assert (has_colors() );
+
+    start_color();
+    init_pair(GRASS_PAIR, COLOR_YELLOW, COLOR_GREEN);
+    init_pair(WATER_PAIR, COLOR_CYAN, COLOR_BLUE);
+    init_pair(MOUNTAIN_PAIR, COLOR_BLACK, COLOR_WHITE);
+    init_pair(PLAYER_PAIR, COLOR_RED, COLOR_MAGENTA);
+
 }
 
 void
@@ -688,9 +696,11 @@ cli_process_key_interrupt(int ch)
     case '.':
             if (cli_is_char_mode_on() &&
                      cli_is_prev_char (default_cli, ' ')) {
-                /* ToDo : Display all possible cmds*/
+                printw("\n");
+                cmdtc_display_all_complete_commands (default_cli->cmdtc);
+                cli_printsc (default_cli, true);
                 break;
-            }        
+            }
     default:
         if (default_cli->cnt == MAX_COMMAND_LENGTH)
             break;

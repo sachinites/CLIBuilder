@@ -7,7 +7,7 @@
 #include "../cmdtlv.h"
 #include "../string_util.h"
 
-/* Standard Validations */
+/* Standard Validations Begin*/
 
 typedef CLI_VAL_RC (*leaf_type_handler)(param_t *param,  char *value_passed);
 
@@ -133,10 +133,10 @@ clistd_validate_leaf (param_t *param) {
 }
 
 
-/* Standard Validations */
+/* Standard Validations End */
 
 int
-config_device_default_handler (param_t *param, ser_buff_t *ser_buff, op_mode enable_or_disable) {
+clistd_config_device_default_handler (param_t *param, ser_buff_t *ser_buff, op_mode enable_or_disable) {
 
     tlv_struct_t *tlv = NULL;
     
@@ -154,40 +154,22 @@ config_device_default_handler (param_t *param, ser_buff_t *ser_buff, op_mode ena
     return 0;
 }
 
-static void
-_dump_one_cmd(param_t *param, unsigned short tabs)
-{
-
-    int i = 0;
-
-    PRINT_TABS(tabs);
-
-    if (IS_PARAM_CMD(param) || IS_PARAM_NO_CMD(param))
-        printw("-->%s(%d)", GET_CMD_NAME(param), tabs);
-    else
-        printw("-->%s(%d)", GET_LEAF_TYPE_STR(param), tabs);
-
-    for (; i < MAX_OPTION_SIZE; i++)
-    {
-        if (param->options[i])
-        {
-            printw("\n");
-            _dump_one_cmd(param->options[i], ++tabs);
-            --tabs;
-        }
-        else
-            break;
-    }
-}
-
-static void dump_cmd_tree()
-{
-    _dump_one_cmd(libcli_get_root_hook(), 0);
-}
-
 int
-show_cmd_tree(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_disable){
+show_help_handler(param_t *param, ser_buff_t *b, op_mode enable_or_disable){
 
-        dump_cmd_tree();
-        return 0;
+    printw("\nWelcome to Help Wizard\n");
+    printw("========================\n");
+    printw("1. Use %c Character after the command to enter command mode\n", MODE_CHARACTER);
+    printw("2. Use %c Character after the command to see possible follow up suboptions\n", SUBOPTIONS_CHARACTER);
+    printw("3. Use %c Character after the command to see possible complete command completions\n", CMD_EXPANSION_CHARACTER);
+    printw("4. [ ctrl + l ] - clear screen\n");
+    printw("5. [ ctrl + t ] - jump to top of cmd tree\n");
+    printw("6. [ BackSpace ] - jump one level up of command tree\n");
+    printw("7. config [ %s ] console name <console name> - set/unset new console name\n", NEGATE_CHARACTER);
+    printw("8. [UP DOWN Arrow] - show the command history\n");
+    attron(COLOR_PAIR(PLAYER_PAIR));
+    printw( "          Author : Abhishek Sagar\n");
+    printw( "          Visit : www.csepracticals.com for more courses and projects\n");
+    attroff(COLOR_PAIR(PLAYER_PAIR));
+    return 0;
 }

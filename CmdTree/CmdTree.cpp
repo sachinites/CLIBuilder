@@ -135,21 +135,31 @@ static void
     init_param(chook, CMD, "run", 0, 0, INVALID, 0, "run cmds");
     libcli_register_param (root_hook, chook);
 
-    param_t *config_hook = libcli_get_config_hook();
+    param_t *hook = libcli_get_config_hook();
 
     {
          /* config host-name <name>*/
          /* config host-name ...*/
         static param_t hostname;
         init_param (&hostname, CMD, "host-name", NULL, NULL, INVALID, NULL, "host-name");
-        libcli_register_param (config_hook, &hostname);
+        libcli_register_param (hook, &hostname);
         {
             /* config host-name <name> */
             static param_t name;
-            init_param(&name, LEAF, NULL, config_device_default_handler, NULL, STRING, "host-name", "Host Name");
+            init_param(&name, LEAF, NULL, clistd_config_device_default_handler, NULL, STRING, "host-name", "Host Name");
             libcli_register_param(&hostname, &name);
             set_param_cmd_code(&name, CONFIG_DEVICE_HOSTNAME);
         }
+    }
+
+    hook = libcli_get_show_hook();
+
+    {
+        /*show help*/
+        static param_t help;
+        init_param (&help, CMD, "help", show_help_handler, NULL, INVALID, NULL, "KYC (Know Your CLI)");
+        libcli_register_param(hook, &help);
+        set_param_cmd_code(&help, SHOW_CLI_HELP);
     }
  }
 
@@ -229,4 +239,34 @@ cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff) {
         put_value_in_tlv((&tlv), GET_LEAF_VALUE_PTR(param));
         collect_tlv(ser_buff, &tlv);
     }
+}
+
+static unsigned char temp[ LEAF_ID_SIZE + 2];
+void
+cmd_tree_display_all_complete_commands(param_t *root, unsigned int index) {
+
+        if(!root)
+            return;
+
+        if(IS_PARAM_CMD(root)){
+            untokenize(index);
+            tokenize(GET_CMD_NAME(root), GET_PARAM_CMD(root)->len, index);
+        }
+
+        else if(IS_PARAM_LEAF(root)){
+            untokenize(index);
+            memset(temp, 0, sizeof(temp));
+            sprintf((char *)temp, "<%s>", GET_LEAF_ID(root));
+            tokenize((char *)temp, strlen(GET_LEAF_ID(root)) + 2, index);
+        }   
+
+        unsigned int i = CHILDREN_START_INDEX;
+
+        for( ; i <= CHILDREN_END_INDEX; i++)
+            cmd_tree_display_all_complete_commands(root->options[i], index+1);
+    
+        if(root->callback){
+            print_tokens(index + 1); 
+            printw("\n");
+        }   
 }

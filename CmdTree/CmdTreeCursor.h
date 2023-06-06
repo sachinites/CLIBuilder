@@ -65,4 +65,7 @@ cmdtc_is_this_config_command (cmd_tree_cursor_t *cmdtc);
 Stack_t *
 cmdtc_get_stack (cmd_tree_cursor_t *cmdtc);
 
+void
+cmdtc_display_all_complete_commands (cmd_tree_cursor_t *cmdtc);
+
 #endif 

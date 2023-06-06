@@ -188,7 +188,7 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
                 return cmd_tree_cursor_move_one_level_up (cmdtc, honor_checkpoint);
             }
             break;        
-        case cmdt_cur_state_single_word_match:       
+        case cmdt_cur_state_single_word_match: 
         case cmdt_cur_state_matching_leaf:
             if (cmdtc->leaf_param) {
                 memset (GET_LEAF_VALUE_PTR(cmdtc->leaf_param), 0, cmdtc->icursor);
@@ -1140,3 +1140,9 @@ cmd_tree_post_cli_trigger (cli_t *cli) {
     printw ("\nParse Success\n");
     cli_record_copy (cli_get_default_history(), cli);
 }
+
+void
+cmdtc_display_all_complete_commands (cmd_tree_cursor_t *cmdtc) {
+
+        cmd_tree_display_all_complete_commands (cmdtc->curr_param, 0);
+ }

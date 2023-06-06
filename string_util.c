@@ -156,7 +156,7 @@ print_tokens(unsigned int index){
         if(tokens[i] == NULL)
             break;
 
-        printf("%s ", tokens[i]);
+        printw("%s ", tokens[i]);
     }
 }
 
