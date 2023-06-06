@@ -10,7 +10,7 @@ typedef struct cmd_tree_cursor_ cmd_tree_cursor_t;
 
 #include "../CmdTree/CmdTreeEnums.h"
 
-void cli_key_processor_init (cli_t **) ;
+void cli_key_processor_init () ;
 
 void cli_content_reset (cli_t *cli);
 
@@ -49,6 +49,9 @@ cli_content_shift_left (cli_t *cli);
 
 void 
 cli_record_copy (cli_history_t *cli_history, cli_t *new_cli);
+
+bool 
+cli_is_prev_char (cli_t *cli, unsigned char ch);
 
 void
 cli_screen_cursor_move_next_line ();

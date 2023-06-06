@@ -2,9 +2,6 @@
 #include <ncurses.h>
 #include "libcli.h"
 
-typedef struct cli_ cli_t;
-cli_t *cli = NULL;
-
 int
 node_callback_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_disable){
     
@@ -25,7 +22,7 @@ node_callback_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_dis
 int
 main(int argc, char **argv){
 
-    cli_key_processor_init (&cli);
+    cli_key_processor_init ();
 
     param_t *show   = libcli_get_show_hook();
     param_t *debug  = libcli_get_debug_hook();
@@ -115,7 +112,7 @@ main(int argc, char **argv){
                 static param_t loopback;    /*Get the param_t variable, either a static memory or heap memory, not stack memory*/
                 init_param(&loopback,       /*Address of the current param*/ 
                         CMD,            /*CMD for command param, LEAF for leaf param*/
-                        "loop",     /*Name of the param, this string is what is displayed in command line*/
+                        "looppack",     /*Name of the param, this string is what is displayed in command line*/
                         0,              /*callback : pointer to application function. Null in this case since 'show node <node-name> loopback' is not a complete command*/
                         0,              /*Applicable only for LEAF params. Always NULL for CMD param*/
                         INVALID,        /*Always INVALID for CMD params*/

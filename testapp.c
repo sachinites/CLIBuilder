@@ -80,12 +80,10 @@ user_vlan_validation_callback(ser_buff_t *ser_buff, char *vlan_id){
     return -1;
 }
 
-cli_t *cli;
-
 int
 main(int argc, char **argv){
     
-    cli_key_processor_init (&cli);
+    cli_key_processor_init ();
     /*Level 0*/
 
     param_t *show   = libcli_get_show_hook();

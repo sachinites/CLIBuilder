@@ -128,6 +128,7 @@ cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
     cmdtc->success = false;
 }
 
+/* Fn to move the cmd tree cursor one level down the tree*/
 void 
 cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
 
@@ -148,6 +149,7 @@ cmdtc_is_this_config_command (cmd_tree_cursor_t *cmdtc) {
     return (bottom_param == libcli_get_config_hook());
 }
 
+/* Fn to move the cursor one level up in the cmd tree.*/
 int
 cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoint)  {
 
@@ -180,6 +182,11 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
             count = cmdtc->icursor ;
             cmdtc->icursor = 0;
             cmdtc->cmdtc_state =  cmdt_cur_state_init;
+            if (count == 0) {
+            /* User has not typed a single character while he has multiple options to choose
+                from. In this case, move one level up*/
+                return cmd_tree_cursor_move_one_level_up (cmdtc, honor_checkpoint);
+            }
             break;        
         case cmdt_cur_state_single_word_match:       
         case cmdt_cur_state_matching_leaf:
@@ -425,13 +432,6 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
             else if (mcount >1 ) {
 
-                if (0 && cmdtc->leaf_param) {
-                    cmdt_cursor_display_options (cmdtc);
-                    cmdtc->leaf_param = NULL;
-                    while (dequeue_glthread_first(&cmdtc->matching_params_list)) ;
-                    return cmdt_cursor_no_match_further;
-                }
-
                 /* We are here when user pressed ' ' and there are multiple matching params, and 
                     no leaf at this level. Auto-complete to the matching point amoing all params here*/
                 len = cmdtc_find_common_intial_lcs_len (&cmdtc->matching_params_list, 0);
@@ -445,20 +445,12 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                         (int)GET_CMD_NAME(param)[cmdtc->icursor]);
                 }
                 cmdt_cursor_display_options (cmdtc);
+                cmdtc->cmdtc_state = cmdt_cur_state_multiple_matches;
                 return cmdt_cursor_no_match_further;
             }
 
             else if (mcount == 1) {
 
-                if (0 && cmdtc->leaf_param) {
-                    
-                    cmdt_cursor_display_options (cmdtc);
-                    /* Leaf is available at this level, user just cant type ' '. Undo
-                        the state change and block user cursor*/
-                    cmdtc->leaf_param = NULL;
-                    while (dequeue_glthread_first(&cmdtc->matching_params_list));
-                    return cmdt_cursor_no_match_further;
-                }
                 /* Only one matching key-word, go for auto-completion now*/
                 cmdtc->cmdtc_state = cmdt_cur_state_single_word_match;
                 cmdtc->curr_param = glue_to_param (glthread_get_next (&cmdtc->matching_params_list));
@@ -477,13 +469,6 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
 
         case cmdt_cur_state_multiple_matches:
-
-            /* If there exist leaf on this level and user press ' ', but there are keywords matching
-                with the word types so far, allow the user to continue input to the point until he type enough to enter cmdt_cur_state_matching_leaf state */
-            if (0 && cmdtc->leaf_param) {
-                cmdt_cursor_display_options (cmdtc);
-                return  cmdt_cursor_no_match_further;;
-            }
 
             /* Could be possible that user has fully typed-out the word and now pressed
                  the space. But there are other words which satisfies the match criteria. For example,

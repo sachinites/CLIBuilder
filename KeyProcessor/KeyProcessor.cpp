@@ -156,7 +156,7 @@ cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
     if (cli_history->count ==  CLI_HISTORY_LIMIT) return;
     if (cli_is_buffer_empty (new_cli)) return;
     if (default_cli_history_list->curr_ptr == new_cli) return;
-    
+
     cli_t *cli = cli_clone (new_cli);
     if (cli_history->cli_history_list == NULL) {
         cli_history->cli_history_list = cli;
@@ -178,13 +178,9 @@ cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
 }
 
 void
-cli_key_processor_init (cli_t **cli) {
+cli_key_processor_init () {
 
-    assert(!default_cli);
-    assert(!(*cli));
-
-    *cli = (cli_t *)calloc (1, sizeof(cli_t));
-    default_cli = *cli;
+    default_cli = (cli_t *)calloc (1, sizeof(cli_t));
 
     cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, (uint8_t) strlen (DEF_CLI_HDR));
 
@@ -277,6 +273,12 @@ void
 cli_set_default_cli (cli_t *cli) {
 
     default_cli = cli;
+}
+
+bool 
+cli_is_prev_char (cli_t *cli, unsigned char ch) {
+
+    return (cli->clibuff[cli->current_pos -1] == ch);
 }
 
 void 
@@ -673,19 +675,19 @@ cli_process_key_interrupt(int ch)
     /* Put all the probable fall-through to default cases here*/
     case '?':
             if (cli_is_char_mode_on() &&
-                    default_cli->clibuff[default_cli->current_pos -1] == ' ') {
+                    cli_is_prev_char (default_cli, ' ')) {
                 cmdtc_process_question_mark(default_cli->cmdtc);
                 break;
             }
     case '/':
             if (cli_is_char_mode_on() &&
-                    default_cli->clibuff[default_cli->current_pos -1] == ' ') {
+                     cli_is_prev_char (default_cli, ' ')) {
                 cmd_tree_enter_mode (default_cli->cmdtc);
                 break;
-            }    
+            }
     case '.':
             if (cli_is_char_mode_on() &&
-                    default_cli->clibuff[default_cli->current_pos -1] == ' ') {
+                     cli_is_prev_char (default_cli, ' ')) {
                 /* ToDo : Display all possible cmds*/
                 break;
             }        

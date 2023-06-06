@@ -1,4 +1,6 @@
 #include <string.h>
+#include <arpa/inet.h>
+#include <ctype.h>
 #include "clistd.h"
 #include "CmdTree.h"
 #include "../KeyProcessor/KeyProcessor.h"
@@ -9,50 +11,53 @@
 
 typedef CLI_VAL_RC (*leaf_type_handler)(param_t *param,  char *value_passed);
 
+static int
+ip_version(const char *src) {
+    char buf[16];
+    if (inet_pton(AF_INET, src, buf)) {
+        return 4;
+    } else if (inet_pton(AF_INET6, src, buf)) {
+        return 6;
+    }
+    return -1;
+}
+
 static CLI_VAL_RC
 ipv4_validation_handler (param_t *leaf, char *value_passed){
 
-    char *token, *rest;
-    int num, dotCount = 0;
-
-    // Make a copy of the original string
-    char *ipCopy = strdup(value_passed);
-
-    // Tokenize the IP address string using the dot delimiter
-    token = strtok_r(ipCopy, ".", &rest);
-
-    while (token != NULL) {
-
-        dotCount++;
-
-        // Check if the token is a valid number
-        if (sscanf(token, "%d", &num) != 1 || num < 0 || num > 255) {
-            free(ipCopy);
-            return VALIDATION_FAILED;
-        }
-
-        token = strtok_r(NULL, ".", &rest);
-    }
-
-    free(ipCopy);
-
-    // Check if there are exactly 4 parts separated by dots
-    if (dotCount != 4)
-        return VALIDATION_FAILED;
-
-    return VALIDATION_SUCCESS;
+    if (ip_version ((const char *)value_passed) == 4) 
+        return VALIDATION_SUCCESS;
+    return VALIDATION_FAILED;
 }
 
 static CLI_VAL_RC
 ipv6_validation_handler(param_t *leaf, char *value_passed){
 
-     return VALIDATION_SUCCESS;
+    if (ip_version ((const char *)value_passed) == 6) 
+        return VALIDATION_SUCCESS;
+    return VALIDATION_FAILED;
 }
 
 static CLI_VAL_RC
 int_validation_handler(param_t *leaf, char *value_passed){
 
-     return VALIDATION_SUCCESS;
+    if (value_passed == NULL || *value_passed == '\0')
+        return VALIDATION_FAILED; 
+
+    // Check if the first character is a valid sign (+ or -)
+    if (*value_passed == '+' || *value_passed == '-')
+        value_passed++; // Skip the sign
+
+    // Check each remaining character
+    while (*value_passed != '\0') {
+
+        if (!isdigit(*value_passed))
+            return VALIDATION_FAILED;
+
+        value_passed++;
+    }
+
+    return VALIDATION_SUCCESS;
 }
 
 static CLI_VAL_RC
@@ -61,10 +66,47 @@ string_validation_handler(param_t *leaf, char *value_passed){
      return VALIDATION_SUCCESS;
 }
 
+static int 
+isFloat(const char *input) {
+    // Check if the input is empty
+    if (input == NULL || *input == '\0')
+        return 0; // Not a float
+
+    // Check if the first character is a valid sign (+ or -)
+    if (*input == '+' || *input == '-')
+        input++; // Skip the sign
+
+    int dotCount = 0;
+
+    // Check each remaining character
+    while (*input != '\0') {
+        if (*input == '.') {
+            dotCount++;
+
+            // Check if there is more than one dot
+            if (dotCount > 1)
+                return 0; // Not a float
+        }
+        else if (!isdigit(*input))
+            return 0; // Not a float
+
+        input++;
+    }
+
+    // Check if the float ends with a dot
+    if (*(input - 1) == '.')
+        return 0; // Not a float
+
+    return 1; // Input is a float
+}
+
 static CLI_VAL_RC
 float_validation_handler(param_t *leaf, char *value_passed){
 
-     return VALIDATION_SUCCESS;
+     if (isFloat ((const char *)value_passed) == 1) {
+        return VALIDATION_SUCCESS;
+     }
+     return VALIDATION_FAILED;
 }
 
 static CLI_VAL_RC 
