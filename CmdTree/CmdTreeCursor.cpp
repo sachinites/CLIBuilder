@@ -6,6 +6,7 @@
 #include "../cmdtlv.h"
 #include "../string_util.h"
 #include "CmdTree.h"
+#include "clistd.h"
 #include "CmdTreeCursor.h"
 #include "../KeyProcessor/KeyProcessor.h"
 
@@ -23,17 +24,30 @@ typedef enum cmdt_cursor_state_ {
 
 typedef struct cmd_tree_cursor_ {
 
+    /* The root of the current CLI being triggered. It could be any non-leaf
+        param in the CLI history.*/
     param_t *root;
+    /* DS used to store the CLI conext in execution*/
     Stack_t *stack;
+    /* When entering into Mode, this chkpnt is used to mark the stack state*/
     int stack_checkpoint;
+    /* Buffer used to store the values of individual keywords of CLI.  This should go hand-in-hand
+        with the stack. This TLV buffer is given to the application eventually for parsing and picking up CLI values*/
     ser_buff_t *tlv_buffer;
+    /* While parsing the cmd tree, this pointer points to the current param being parsed*/
     param_t *curr_param;
+    /* This is the index into Param's keyword/value to track which character is being typed*/
     int icursor;
+    /* This is used to track the state of cmd tree in reslation to CLI being executed*/
     cmdt_tree_cursor_state_t cmdtc_state;
+    /* This is the list of multiple matching keywords*/
     glthread_t matching_params_list;
+    /* This is the leaf param present in the current level in the cmd tree*/
     param_t *leaf_param;
+    /* This is the cursor type, where cbc or wbw*/
     cmdtc_cursor_type_t cmdtc_type;
-    bool success;  /* Was command successfully triggered*/
+    /* This is boolean which indiscate that cmd is successfully submitted to appln or not */
+    bool success;
 } cmd_tree_cursor_t;
 
 /* This cursor will be used when we are working in line-by-line mode*/
@@ -126,6 +140,14 @@ cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
     cmdtc->leaf_param = NULL;
 }
 
+bool 
+cmdtc_is_this_config_command (cmd_tree_cursor_t *cmdtc) {
+
+    assert (!isStackEmpty (cmdtc->stack));
+    param_t *bottom_param = (param_t *)cmdtc->stack->slot[0];
+    return (bottom_param == libcli_get_config_hook());
+}
+
 int
 cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoint)  {
 
@@ -136,7 +158,7 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
     switch (cmdtc->cmdtc_state) {
         case cmdt_cur_state_init:
             if (cmdtc->curr_param == libcli_get_root_hook()) return 0;
-            assert (cmdtc->curr_param == (param_t *)getTopElem(cmdtc->stack));
+            assert (cmdtc->curr_param == (param_t *)StackGetTopElem(cmdtc->stack));
             if (honor_checkpoint) {
                 if (cmdtc->stack_checkpoint == cmdtc->stack->top) return 0; 
             }
@@ -146,7 +168,7 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
                             strlen(GET_LEAF_VALUE_PTR(cmdtc->curr_param));
             count += 1;
             cmdtc->curr_param = (isStackEmpty (cmdtc->stack)) ?  \
-                libcli_get_root_hook() : (param_t *)getTopElem(cmdtc->stack);
+                libcli_get_root_hook() : (param_t *)StackGetTopElem(cmdtc->stack);
             serialize_buffer_skip (cmdtc->tlv_buffer, -1 * sizeof (tlv_struct_t));
         break;
         case cmdt_cur_state_multiple_matches:
@@ -173,8 +195,8 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
                 cmdtc->curr_param = libcli_get_root_hook();
                 break;
             }
-            assert (cmdtc->curr_param != (param_t *)getTopElem(cmdtc->stack));
-            cmdtc->curr_param = (param_t *)getTopElem(cmdtc->stack);           
+            assert (cmdtc->curr_param != (param_t *)StackGetTopElem(cmdtc->stack));
+            cmdtc->curr_param = (param_t *)StackGetTopElem(cmdtc->stack);           
             break;
         case cmdt_cur_state_no_match:
             assert(0);
@@ -488,6 +510,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                 cli_process_key_interrupt (
                         (int)GET_CMD_NAME(param)[cmdtc->icursor]);
             }
+            cmdt_cursor_display_options (cmdtc);
             return cmdt_cursor_no_match_further;
 
 
@@ -505,7 +528,13 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
 
         case cmdt_cur_state_matching_leaf:
-            /* User has typed ' ' while inputting the value of leaf. Go to next level*/
+
+            /* Standard Validation Checks on Leaf */
+            if (clistd_validate_leaf (cmdtc->curr_param) != VALIDATION_SUCCESS) {
+                return cmdt_cursor_no_match_further;
+            }
+
+             /* User has typed ' ' while inputting the value of leaf. Go to next level*/
             cmd_tree_cursor_move_to_next_level (cmdtc);
             return cmdt_cursor_ok;
 
@@ -706,6 +735,11 @@ cmdtc_is_cursor_at_bottom_mode_node (cmd_tree_cursor_t *cmdtc) {
     return (param->options[0] == NULL);
 }
 
+Stack_t *
+cmdtc_get_stack (cmd_tree_cursor_t *cmdtc) {
+    return cmdtc->stack;
+}
+
 /* Cmd Tree Cursor based functions */
 void 
 cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc) {
@@ -867,9 +901,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
     int tlv_buffer_original_size = tlv_buffer_get_size (cmdtc->tlv_buffer);
     int tlv_buffer_checkpoint_offset = serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer);
 
-    param = (param_t *)cmdtc->stack->slot[0];
-
-    if (param == libcli_get_config_hook ()) {
+    if (cmdtc_is_this_config_command (cmdtc)) {
         /* ToDo : Support Command Negation !*/
         enable_or_diable = CONFIG_ENABLE;
     }
@@ -877,6 +909,19 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
         enable_or_diable = OPERATIONAL;
     }
 
+    /* Handle Trigger of Operational Cmd*/
+    if (enable_or_diable == OPERATIONAL) {
+
+        param = (param_t *)StackGetTopElem(cmdtc->stack);
+        if (param->callback (param, cmdtc->tlv_buffer, enable_or_diable)) {
+            cmdtc->success = false;
+            return;
+        }
+        return;
+    }
+
+    /* Handle Trigger of Config Command. Config Commands are triggered in
+        patches !*/
     for (i = cmdtc->stack_checkpoint + 1 ; i <= cmdtc->stack->top; i++) {
 
         param = (param_t *)cmdtc->stack->slot[i];
@@ -932,6 +977,13 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
             cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         case cmdt_cur_state_matching_leaf:
+            /* Standard Validation Checks on Leaf */
+            if (clistd_validate_leaf (cmdtc->curr_param) != VALIDATION_SUCCESS) {
+                printw ("\nError : Invalid value %s Specified", 
+                    GET_LEAF_VALUE_PTR (cmdtc->curr_param));
+                cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
+                return;
+            }            
             /* Push it into the stack and Fire the CLI*/
             cmd_tree_cursor_move_to_next_level (cmdtc);
             cmd_tree_trigger_cli (cmdtc);
@@ -1014,7 +1066,7 @@ find_matching_param (param_t **options, const char *cmd_name){
         printw("%-2d. %s\n", i, GET_CMD_NAME(array_of_possibilities[i]));
 
     printw("Choice [0-%d] : ? ", j-1);
-    scanf("%d", &choice);
+    scanw("%d", &choice);
     
     if(choice < 0 || choice > (j-1)){
         printw("\nInvalid Choice");
@@ -1035,7 +1087,7 @@ cmdtc_parse_full_command (cli_t *cli) {
     char** tokens = NULL;
     cmd_tree_cursor_t *cmdtc;
 
-    cmdtc = cli_get_cmdtc (cli);
+    cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
    
     re_init_tokens(MAX_CMD_TREE_DEPTH);
 
@@ -1100,5 +1152,6 @@ cmdtc_parse_full_command (cli_t *cli) {
 void 
 cmd_tree_post_cli_trigger (cli_t *cli) {
 
-    printw ("\nParse Success");
+    printw ("\nParse Success\n");
+    cli_record_copy (cli_get_default_history(), cli);
 }

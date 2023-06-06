@@ -3,6 +3,7 @@
 
 typedef struct cmd_tree_cursor_ cmd_tree_cursor_t;
 typedef struct cli_ cli_t;
+typedef struct stack Stack_t;
 
 void 
 cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc);
@@ -57,5 +58,11 @@ cmd_tree_post_cli_trigger (cli_t *cli);
 
 void 
 cmdtc_reset_cursor (cmd_tree_cursor_t *cmdtc);
+
+bool 
+cmdtc_is_this_config_command (cmd_tree_cursor_t *cmdtc);
+
+Stack_t *
+cmdtc_get_stack (cmd_tree_cursor_t *cmdtc);
 
 #endif 

@@ -45,8 +45,6 @@ struct _param_t_{
 };
 GLTHREAD_TO_STRUCT (glue_to_param, param_t, glue);
 
-typedef CLI_VAL_RC (*leaf_type_handler)(leaf_t *leaf, char *value_passed);
-
 #define GET_PARAM_CMD(param)    (param->cmd_type.cmd)
 #define GET_PARAM_LEAF(param)   (param->cmd_type.leaf)
 #define IS_PARAM_NO_CMD(param)  (param->param_type == NO_CMD)

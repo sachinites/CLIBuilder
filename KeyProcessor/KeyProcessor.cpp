@@ -5,7 +5,7 @@
 #include <ncurses.h>
 #include <assert.h>
 #include <stdbool.h>
-
+#include "../stack/stack.h"
 #include "../cli_const.h"
 #include "KeyProcessor.h"
 #include "CmdTree/CmdTree.h"
@@ -44,6 +44,12 @@ bool
 cli_is_char_mode_on () {
 
     return keyp_char_mode ;
+}
+
+cli_history_t *
+cli_get_default_history () {
+
+    return default_cli_history_list ;
 }
 
 #define MODE_MSG_DISPLAY    \
@@ -120,15 +126,38 @@ cli_is_same (cli_t *cli1, cli_t *cli2) {
     return false;
 }
 
+static cli_t *cli_clone (cli_t *cli) {
+
+    param_t *param;
+    int top = 0, rc = 0;
+    Stack_t *stack;
+    cli_t *new_cli = (cli_t *)calloc (1, sizeof (cli_t));
+    rc = strlen (DEF_CLI_HDR);
+    cli_set_hdr (new_cli, (unsigned char *)DEF_CLI_HDR, rc);
+    new_cli->cmdtc = NULL;
+    stack = cmdtc_get_stack(cli->cmdtc);
+    int topx = stack->top + 1;
+    while (top != topx) {
+        param = (param_t *)stack->slot[top];
+        rc += sprintf ((char *)new_cli->clibuff + rc , "%s ", 
+            IS_PARAM_CMD(param) ? GET_CMD_NAME(param) :
+            GET_LEAF_VALUE_PTR(param));
+        top++;
+    }
+    new_cli->cnt += rc;
+    new_cli->current_pos = new_cli->cnt;
+    new_cli->end_pos =  new_cli->cnt;
+    return new_cli;
+}   
+
 void 
 cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
 
     if (cli_history->count ==  CLI_HISTORY_LIMIT) return;
     if (cli_is_buffer_empty (new_cli)) return;
-
-    cli_t *cli = (cli_t *)calloc (1, sizeof (cli_t));
-    memcpy (cli, new_cli, sizeof (cli_t));
-    cli->cmdtc = NULL;
+    if (default_cli_history_list->curr_ptr == new_cli) return;
+    
+    cli_t *cli = cli_clone (new_cli);
     if (cli_history->cli_history_list == NULL) {
         cli_history->cli_history_list = cli;
         cli_history->count++;
@@ -429,11 +458,12 @@ cli_process_key_interrupt(int ch)
     case KEY_BACKSPACE:  /*On Linux Platform, BS has ascii code of 263*/
     case KEY_BACKSPACE_MOBAXTERM: /* On Windows, BS has ascii code of 8*/
         /* Case 1 : if we are at the beginning of line */
-        if (default_cli->current_pos == default_cli->start_pos)
-            break;
+        if (cli_cursor_is_at_begin_of_line (default_cli)) break;
 
         if (cli_is_char_mode_on ()) {
+
             /* in Char mode we are always at the end of line*/
+            assert(cli_cursor_is_at_end_of_line (default_cli));
             int bs_count = cmd_tree_cursor_move_one_level_up (default_cli->cmdtc, true);
             if (bs_count) {
                 cli_screen_cursor_move_cursor_left (bs_count, true);
@@ -503,7 +533,7 @@ cli_process_key_interrupt(int ch)
             cli_screen_cursor_save_screen_pos(default_cli);
             move(default_cli->row_store, default_cli->end_pos);
             if (!cli_application_process(default_cli)) {
-                cli_record_copy(default_cli_history_list, default_cli);
+                // cli_record_copy(default_cli_history_list, default_cli);
             }
             cli_content_reset(default_cli);
             cli_printsc(default_cli, true);
@@ -515,7 +545,7 @@ cli_process_key_interrupt(int ch)
             assert(!default_cli->cmdtc);
             default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
             if (!cli_application_process(default_cli)) {
-                cli_record_copy(default_cli_history_list, default_cli);
+                // cli_record_copy(default_cli_history_list, default_cli);
             }
             default_cli->cmdtc = NULL;
             assert(cli_store);
@@ -642,16 +672,23 @@ cli_process_key_interrupt(int ch)
         break;
     /* Put all the probable fall-through to default cases here*/
     case '?':
-            if (cli_is_char_mode_on()) {
+            if (cli_is_char_mode_on() &&
+                    default_cli->clibuff[default_cli->current_pos -1] == ' ') {
                 cmdtc_process_question_mark(default_cli->cmdtc);
                 break;
             }
     case '/':
-            if (cli_is_char_mode_on()) {
+            if (cli_is_char_mode_on() &&
+                    default_cli->clibuff[default_cli->current_pos -1] == ' ') {
                 cmd_tree_enter_mode (default_cli->cmdtc);
                 break;
             }    
     case '.':
+            if (cli_is_char_mode_on() &&
+                    default_cli->clibuff[default_cli->current_pos -1] == ' ') {
+                /* ToDo : Display all possible cmds*/
+                break;
+            }        
     default:
         if (default_cli->cnt == MAX_COMMAND_LENGTH)
             break;
@@ -700,8 +737,10 @@ cli_start_shell () {
     int ch;  
 
     cli_printsc (default_cli, true);
+    MODE_MSG_DISPLAY;
 
     while (true) {
+    
         ch = getch();
 
         if (cli_is_char_mode_on()) {
@@ -710,13 +749,10 @@ cli_start_shell () {
                 keyp_char_mode = false;
                 /* Reset the cmd tree cbc cursor to be used for next command now afresh*/
                 cmd_tree_cursor_reset_for_nxt_cmd (default_cli->cmdtc);
-                /* Assign a wbw cursor to the CLI now*/
-                default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
-                /* Make the new cursor ready to be used afresh*/
-                cmd_tree_cursor_reset_for_nxt_cmd (default_cli->cmdtc);
+                default_cli->cmdtc = NULL;
+                MODE_MSG_DISPLAY;
             }
         }
-        MODE_MSG_DISPLAY;
         cli_process_key_interrupt ((int)ch);
     }
 }

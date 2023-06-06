@@ -107,7 +107,7 @@ void* pop(Stack_t *stack)
     return ret;
 }
 
-void* getTopElem(Stack_t *stack)
+void* StackGetTopElem(Stack_t *stack)
 {
     if(!stack || stack->top == -1) {
         return NULL;

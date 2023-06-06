@@ -35,6 +35,8 @@ typedef enum{
     MODE_UNKNOWN
 } op_mode;
 
+/* Pls refer to leaf_type_handler leaf_handler_array[ ] array
+    should you choose to update/modify the ordering of these enums*/
 typedef enum leaf_type_{
     INT,
     STRING,
@@ -43,7 +45,7 @@ typedef enum leaf_type_{
     IPV6,
     BOOLEAN,
     INVALID,
-    LEAF_MAX
+    LEAF_TYPE_MAX
 } leaf_type_t;
 
 static const char *
@@ -64,8 +66,8 @@ get_str_leaf_type(leaf_type_t leaf_type)
         return "IPV6";
     case BOOLEAN:
         return "BOOLEAN";
-    case LEAF_MAX:
-        return "LEAF_MAX";
+    case LEAF_TYPE_MAX:
+        return "LEAF_TYPE_MAX";
     default:
         return "Unknown";
     }   
