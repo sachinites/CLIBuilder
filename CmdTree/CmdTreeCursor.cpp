@@ -381,6 +381,8 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
 
     cli_screen_cursor_move_next_line ();
 
+    attron (COLOR_PAIR(GREEN_ON_BLACK));
+
     ITERATE_GLTHREAD_BEGIN (&cmdtc->matching_params_list, curr) {
 
         param = glue_to_param (curr);
@@ -397,6 +399,7 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
             GET_PARAM_HELP_STRING(cmdtc->leaf_param));        
     }
 
+    attroff (COLOR_PAIR(GREEN_ON_BLACK));
     cli_printsc (cli_get_default_cli(), false);
     getyx(stdscr, row, col2);
     move (row, col1);
@@ -842,6 +845,7 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
 
     assert(cmdtc->stack->top >= cmdtc->stack_checkpoint);
 
+    /* Restore the stack to the checkpoint */
     while (cmdtc->stack->top > cmdtc->stack_checkpoint) {
 
         param = (param_t *)pop(cmdtc->stack);
@@ -851,7 +855,7 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
         }
     }
 
-    /* It is optional to reset the serialized TLV buffer for the same reason. But let me choose to cleanit up as a good practice.*/
+    /* Restore the serialized buffer to the checkpoint state */
     serialize_buffer_restore_checkpoint(cmdtc->tlv_buffer);
 
     /* Set back the curr_param to start of the root of the tree. Root of the
@@ -878,7 +882,9 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
     /* Do not trigger the CLI if the user has not typed CLI to the
         completion*/
     if (!cmdtc->curr_param->callback) {
+        attron(COLOR_PAIR(RED_ON_BLACK));
         printw("\nError : Incomplete CLI...");
+        attroff(COLOR_PAIR(RED_ON_BLACK));
         return;
     }
     cmdtc->success = true;
@@ -964,8 +970,13 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
         case cmdt_cur_state_matching_leaf:
             /* Standard Validation Checks on Leaf */
             if (clistd_validate_leaf (cmdtc->curr_param) != VALIDATION_SUCCESS) {
-                printw ("\nError : Invalid value %s Specified", 
-                    GET_LEAF_VALUE_PTR (cmdtc->curr_param));
+
+                attron(COLOR_PAIR(RED_ON_BLACK));
+                printw ("\nError : value %s do not comply with expected data type : %s", 
+                    GET_LEAF_VALUE_PTR (cmdtc->curr_param),
+                    GET_LEAF_TYPE_STR(cmdtc->curr_param));
+                attroff(COLOR_PAIR(RED_ON_BLACK));
+                memset (GET_LEAF_VALUE_PTR(cmdtc->curr_param), 0, LEAF_VALUE_HOLDER_SIZE);
                 cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
                 return;
             }            
@@ -1096,7 +1107,9 @@ cmdtc_parse_full_command (cli_t *cli) {
         param = find_matching_param(&param->options[0], *(tokens +i));
 
         if (!param){
+            attron(COLOR_PAIR(RED_ON_BLACK));
             printw ("\nCLI Error : Unrecognized Param : %s", *(tokens + i));
+            attroff(COLOR_PAIR(RED_ON_BLACK));
             cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
             return false;
         }
@@ -1105,12 +1118,24 @@ cmdtc_parse_full_command (cli_t *cli) {
 
         if (IS_PARAM_LEAF(param)) {
 
-            if (param->cmd_type.leaf->user_validation_cb_fn &&
+            if (clistd_validate_leaf (param) != VALIDATION_SUCCESS) {
 
+                attron(COLOR_PAIR(RED_ON_BLACK));
+                printw ("\nError : value %s do not comply with expected data type : %s", 
+                    *(tokens + i),
+                    GET_LEAF_TYPE_STR(param));
+                attroff(COLOR_PAIR(RED_ON_BLACK));
+                cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
+                return false;
+            } 
+
+            if (param->cmd_type.leaf->user_validation_cb_fn &&
                 (param->cmd_type.leaf->user_validation_cb_fn(
                     cmdtc->tlv_buffer, (unsigned char *)*(tokens + i)) == VALIDATION_FAILED)) {
-
-                printw ("\nCLI Error : User Validation Failed for Param : %s", *(tokens + i));
+                
+                attron(COLOR_PAIR(RED_ON_BLACK));
+                printw ("\nCLI Error : User Validation Failed for value : %s", *(tokens + i));
+                attroff(COLOR_PAIR(RED_ON_BLACK));
                 cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
                 return false;
             }
@@ -1137,7 +1162,9 @@ cmdtc_parse_full_command (cli_t *cli) {
 void 
 cmd_tree_post_cli_trigger (cli_t *cli) {
 
+    attron (COLOR_PAIR(GREEN_ON_BLACK));
     printw ("\nParse Success\n");
+    attroff (COLOR_PAIR(GREEN_ON_BLACK));
     cli_record_copy (cli_get_default_history(), cli);
 }
 

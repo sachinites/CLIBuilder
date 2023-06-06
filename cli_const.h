@@ -96,6 +96,7 @@ typedef enum{
 #define WATER_PAIR     2
 #define MOUNTAIN_PAIR  3
 #define PLAYER_PAIR    4
-
+#define RED_ON_BLACK 5
+#define GREEN_ON_BLACK 6
 
 #endif 

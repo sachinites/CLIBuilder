@@ -157,6 +157,7 @@ clistd_config_device_default_handler (param_t *param, ser_buff_t *ser_buff, op_m
 int
 show_help_handler(param_t *param, ser_buff_t *b, op_mode enable_or_disable){
 
+    attron(COLOR_PAIR(GREEN_ON_BLACK));
     printw("\nWelcome to Help Wizard\n");
     printw("========================\n");
     printw("1. Use %c Character after the command to enter command mode\n", MODE_CHARACTER);
@@ -167,6 +168,7 @@ show_help_handler(param_t *param, ser_buff_t *b, op_mode enable_or_disable){
     printw("6. [ BackSpace ] - jump one level up of command tree\n");
     printw("7. config [ %s ] console name <console name> - set/unset new console name\n", NEGATE_CHARACTER);
     printw("8. [UP DOWN Arrow] - show the command history\n");
+    attroff(COLOR_PAIR(GREEN_ON_BLACK));
     attron(COLOR_PAIR(PLAYER_PAIR));
     printw( "          Author : Abhishek Sagar\n");
     printw( "          Visit : www.csepracticals.com for more courses and projects\n");

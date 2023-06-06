@@ -196,13 +196,15 @@ cli_key_processor_init () {
     cbreak();         // Disable line buffering
     noecho();        // Disable character echoing
     refresh();        // Update the screen
+    
     assert (has_colors() );
-
     start_color();
     init_pair(GRASS_PAIR, COLOR_YELLOW, COLOR_GREEN);
     init_pair(WATER_PAIR, COLOR_CYAN, COLOR_BLUE);
     init_pair(MOUNTAIN_PAIR, COLOR_BLACK, COLOR_WHITE);
     init_pair(PLAYER_PAIR, COLOR_RED, COLOR_MAGENTA);
+    init_pair(RED_ON_BLACK, COLOR_RED, COLOR_BLACK);
+    init_pair(GREEN_ON_BLACK, COLOR_GREEN, COLOR_BLACK);
 
 }
 

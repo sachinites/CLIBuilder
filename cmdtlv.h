@@ -100,7 +100,7 @@ dump_tlv_serialized_buffer(ser_buff_t *tlv_ser_buff){
     //printw("cmd code = %d\n", EXTRACT_CMD_CODE(tlv_ser_buff));
     TLV_LOOP_BEGIN(tlv_ser_buff, tlv){
         print_tlv_content(tlv);
-        printf("\n");
+        printw("\n");
     } TLV_LOOP_END;
 }
 
