@@ -43,7 +43,7 @@ typedef struct tlv_struct{
 {                                                                                       \
     assert(ser_buff);                                                                   \
     tlvptr = (tlv_struct_t *)(ser_buff->b);                                             \
-    unsigned int _i = 0, k = tlv_buffer_get_size(ser_buff)/sizeof(tlv_struct_t);   \
+    unsigned int _i = 0, k = serialize_buffer_get_size(ser_buff)/sizeof(tlv_struct_t);   \
     for(; _i < k; _i++, tlvptr++)
 
 #define TLV_LOOP_END    }

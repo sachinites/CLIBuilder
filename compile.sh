@@ -12,3 +12,4 @@ g++ -g -c -I . testapp.c -o testapp.o -fpermissive
 g++ -g app.o string_util.o serializer/serialize.o  stack/stack.o KeyProcessor/KeyProcessor.o CmdTree/CmdTree.o CmdTree/clistd.o gluethread/glthread.o CmdTree/CmdTreeCursor.o -o exe -lncurses
 g++ -g main4.o string_util.o serializer/serialize.o  stack/stack.o KeyProcessor/KeyProcessor.o CmdTree/CmdTree.o CmdTree/clistd.o gluethread/glthread.o CmdTree/CmdTreeCursor.o -o main4.exe -lncurses
 g++ -g testapp.o string_util.o serializer/serialize.o  stack/stack.o KeyProcessor/KeyProcessor.o CmdTree/CmdTree.o CmdTree/clistd.o gluethread/glthread.o CmdTree/CmdTreeCursor.o -o testapp.exe -lncurses
+

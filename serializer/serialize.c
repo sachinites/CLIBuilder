@@ -41,12 +41,12 @@ int get_serialize_buffer_current_ptr_offset(ser_buff_t *b){
 	return  b->next;
 }
 
-char* get_serialize_buffer_current_ptr(ser_buff_t *b){
+char* serialize_buffer_get_current_ptr(ser_buff_t *b){
 	if(!b) return NULL;
 	return  (char *)(b->b) + b->next;
 }
 
-int  tlv_buffer_get_size(ser_buff_t *b){
+int  serialize_buffer_get_size(ser_buff_t *b){
 	return b->next;
 }
 

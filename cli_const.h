@@ -75,9 +75,9 @@ get_str_leaf_type(leaf_type_t leaf_type)
 }
 
 typedef enum{
-    VALIDATION_FAILED = -1, 
-    VALIDATION_SUCCESS
-} CLI_VAL_RC;
+    LEAF_VALIDATION_FAILED = -1, 
+    LEAF_VALIDATION_SUCCESS
+} leaf_validation_rc_t;
 
 #define MODE_CHARACTER  '/'
 #define SUBOPTIONS_CHARACTER '?'

@@ -9,7 +9,7 @@
 
 /* Standard Validations Begin*/
 
-typedef CLI_VAL_RC (*leaf_type_handler)(param_t *param,  char *value_passed);
+typedef leaf_validation_rc_t (*leaf_type_handler)(param_t *param,  char *value_passed);
 
 static int
 ip_version(const char *src) {
@@ -22,27 +22,27 @@ ip_version(const char *src) {
     return -1;
 }
 
-static CLI_VAL_RC
+static leaf_validation_rc_t
 ipv4_validation_handler (param_t *leaf, char *value_passed){
 
     if (ip_version ((const char *)value_passed) == 4) 
-        return VALIDATION_SUCCESS;
-    return VALIDATION_FAILED;
+        return LEAF_VALIDATION_SUCCESS;
+    return LEAF_VALIDATION_FAILED;
 }
 
-static CLI_VAL_RC
+static leaf_validation_rc_t
 ipv6_validation_handler(param_t *leaf, char *value_passed){
 
     if (ip_version ((const char *)value_passed) == 6) 
-        return VALIDATION_SUCCESS;
-    return VALIDATION_FAILED;
+        return LEAF_VALIDATION_SUCCESS;
+    return LEAF_VALIDATION_FAILED;
 }
 
-static CLI_VAL_RC
+static leaf_validation_rc_t
 int_validation_handler(param_t *leaf, char *value_passed){
 
     if (value_passed == NULL || *value_passed == '\0')
-        return VALIDATION_FAILED; 
+        return LEAF_VALIDATION_FAILED; 
 
     // Check if the first character is a valid sign (+ or -)
     if (*value_passed == '+' || *value_passed == '-')
@@ -52,18 +52,18 @@ int_validation_handler(param_t *leaf, char *value_passed){
     while (*value_passed != '\0') {
 
         if (!isdigit(*value_passed))
-            return VALIDATION_FAILED;
+            return LEAF_VALIDATION_FAILED;
 
         value_passed++;
     }
 
-    return VALIDATION_SUCCESS;
+    return LEAF_VALIDATION_SUCCESS;
 }
 
-static CLI_VAL_RC
+static leaf_validation_rc_t
 string_validation_handler(param_t *leaf, char *value_passed){
 
-     return VALIDATION_SUCCESS;
+     return LEAF_VALIDATION_SUCCESS;
 }
 
 static int 
@@ -100,19 +100,19 @@ isFloat(const char *input) {
     return 1; // Input is a float
 }
 
-static CLI_VAL_RC
+static leaf_validation_rc_t
 float_validation_handler(param_t *leaf, char *value_passed){
 
      if (isFloat ((const char *)value_passed) == 1) {
-        return VALIDATION_SUCCESS;
+        return LEAF_VALIDATION_SUCCESS;
      }
-     return VALIDATION_FAILED;
+     return LEAF_VALIDATION_FAILED;
 }
 
-static CLI_VAL_RC 
+static leaf_validation_rc_t 
 boolean_validation_handler(param_t *leaf, char *value_passed){
 
-     return VALIDATION_SUCCESS;
+     return LEAF_VALIDATION_SUCCESS;
 }
 
 static leaf_type_handler leaf_handler_array[LEAF_TYPE_MAX] = {
@@ -126,10 +126,13 @@ static leaf_type_handler leaf_handler_array[LEAF_TYPE_MAX] = {
     NULL
 };
 
-extern CLI_VAL_RC
+extern leaf_validation_rc_t
 clistd_validate_leaf (param_t *param) {
 
-    return leaf_handler_array[GET_LEAF_TYPE(param)](param, GET_LEAF_VALUE_PTR (param));
+    if (leaf_handler_array[GET_LEAF_TYPE(param)]) {
+        return leaf_handler_array[GET_LEAF_TYPE(param)](param, GET_LEAF_VALUE_PTR (param));
+    }
+    return LEAF_VALIDATION_SUCCESS;
 }
 
 

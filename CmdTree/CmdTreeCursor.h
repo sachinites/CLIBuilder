@@ -35,17 +35,20 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
 void 
 cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc);
 
+const char *
+cmdtc_get_state_str (cmd_tree_cursor_t *cmdtc);
+
 void 
 cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc);
-
-void
-cmdtc_show_complete_clis (cmd_tree_cursor_t *cmdtc);
 
 void 
 cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) ;
 
 bool 
 cmdtc_is_cursor_at_bottom_mode_node (cmd_tree_cursor_t *cmdtc);
+
+bool 
+cmdtc_is_cursor_at_apex_root (cmd_tree_cursor_t *cmdtc);
 
 bool
 cmdtc_parse_full_command (cli_t *cli);
@@ -67,5 +70,11 @@ cmdtc_get_stack (cmd_tree_cursor_t *cmdtc);
 
 void
 cmdtc_display_all_complete_commands (cmd_tree_cursor_t *cmdtc);
+
+int
+cmdtc_process_pageup_event (cmd_tree_cursor_t *cmdtc);
+
+void
+cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc);
 
 #endif 

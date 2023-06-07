@@ -92,6 +92,69 @@ cmdtc_tree_get_cursor (cmdtc_cursor_type_t cmdtc_type) {
     return NULL;
 }
 
+const char *
+cmdtc_get_state_str (cmd_tree_cursor_t *cmdtc) {
+
+    switch (cmdtc->cmdtc_state) {
+        case cmdt_cur_state_init:
+            return (const char *)"cmdt_cur_state_init";
+        case cmdt_cur_state_multiple_matches:
+            return (const char *)"cmdt_cur_state_multiple_matches";
+        case cmdt_cur_state_single_word_match:
+             return (const char *)"cmdt_cur_state_single_word_match";
+        case cmdt_cur_state_matching_leaf:
+            return (const char *)"cmdt_cur_state_matching_leaf";
+        case  cmdt_cur_state_no_match:
+            return (const char *)"cmdt_cur_state_no_match";
+        default : ;
+    }
+    return NULL;
+}
+
+void
+cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc) {
+
+   tlv_struct_t *top_tlv = NULL;
+   char *tlv_top_name = NULL;
+
+    param_t *param_top = (param_t *)StackGetTopElem (cmdtc->stack);
+  
+    if (!is_serialized_buffer_empty (cmdtc->tlv_buffer)) {
+
+        char *ptr = serialize_buffer_get_current_ptr (cmdtc->tlv_buffer);
+        top_tlv = (tlv_struct_t *)  (ptr - sizeof (tlv_struct_t));
+    }
+
+    if (top_tlv) {
+
+        if (top_tlv->tlv_type == TLV_TYPE_CMD_NAME ||
+                top_tlv->tlv_type == TLV_TYPE_NEGATE) {
+            tlv_top_name = (char *)top_tlv->value;
+        }
+         else {
+             tlv_top_name = (char *)top_tlv->leaf_id;
+         }
+    }
+
+    /* Get the checkpointed param from stack if any*/
+    param_t *param_chkp = (cmdtc->stack_checkpoint > -1) ? \
+                        (param_t *)cmdtc->stack->slot[cmdtc->stack_checkpoint] : NULL;
+
+    printw ("\nroot = %s, curr_param = %s, stack top = %s, "
+                    "chkp = %s, top_index = %d, tlv_top = %s, state = %s", 
+            IS_PARAM_CMD(cmdtc->root) ? 
+                GET_CMD_NAME(cmdtc->root) : GET_LEAF_ID (cmdtc->root),
+            IS_PARAM_CMD(cmdtc->curr_param) ? 
+                GET_CMD_NAME(cmdtc->curr_param) : GET_LEAF_ID (cmdtc->curr_param),
+            param_top ? (IS_PARAM_CMD(param_top) ? 
+                GET_CMD_NAME(param_top) : GET_LEAF_ID (param_top)) : NULL,            
+           param_chkp ? (IS_PARAM_CMD(param_chkp) ? 
+                GET_CMD_NAME(param_chkp) : GET_LEAF_ID (param_chkp)) : NULL,
+            cmdtc->stack->top,
+            tlv_top_name,
+            cmdtc_get_state_str (cmdtc));
+}
+
 bool
 cmdtc_get_cmd_trigger_status (cmd_tree_cursor_t *cmdtc) {
 
@@ -149,6 +212,18 @@ cmdtc_is_this_config_command (cmd_tree_cursor_t *cmdtc) {
     return (bottom_param == libcli_get_config_hook());
 }
 
+bool 
+cmdtc_is_cursor_at_apex_root (cmd_tree_cursor_t *cmdtc) {
+
+    bool rc;
+    rc = (cmdtc->curr_param == libcli_get_root_hook ());
+    if (rc) {
+        assert (isStackEmpty (cmdtc->stack));
+        assert (!serialize_buffer_get_size(cmdtc->tlv_buffer));
+    }
+    return rc;
+}
+
 /* Fn to move the cursor one level up in the cmd tree.*/
 int
 cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoint)  {
@@ -164,14 +239,28 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
             if (honor_checkpoint) {
                 if (cmdtc->stack_checkpoint == cmdtc->stack->top) return 0; 
             }
+            /* Lower down the checkpoint of the stack if we are at checkpoint*/
+            if (cmdtc->stack_checkpoint == cmdtc->stack->top) {
+                cmdtc->stack_checkpoint--;
+            }
             pop(cmdtc->stack);
             count = IS_PARAM_CMD (cmdtc->curr_param) ? \
                             cmdtc->curr_param->cmd_type.cmd->len : \
                             strlen(GET_LEAF_VALUE_PTR(cmdtc->curr_param));
-            count += 1;
+            count += 1; /* +1 is to accomo*/
             cmdtc->curr_param = (isStackEmpty (cmdtc->stack)) ?  \
                 libcli_get_root_hook() : (param_t *)StackGetTopElem(cmdtc->stack);
-            serialize_buffer_skip (cmdtc->tlv_buffer, -1 * sizeof (tlv_struct_t));
+            cmdtc->root = cmdtc->curr_param;
+           /* Lower down the checkpoint of the serialized buffer. */
+            if (serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer) == 
+                    serialize_buffer_get_size (cmdtc->tlv_buffer)) {
+        
+                serialize_buffer_skip (cmdtc->tlv_buffer, -1 * sizeof (tlv_struct_t));
+                serialize_buffer_mark_checkpoint(cmdtc->tlv_buffer);
+            }
+            else {
+                serialize_buffer_skip (cmdtc->tlv_buffer, -1 * sizeof (tlv_struct_t));
+            }
         break;
         case cmdt_cur_state_multiple_matches:
             if (cmdtc->leaf_param) {
@@ -211,6 +300,17 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
     }
     return count;
 }
+
+int
+cmdtc_process_pageup_event (cmd_tree_cursor_t *cmdtc) {
+
+    int count;
+
+    if (isStackEmpty (cmdtc->stack)) return 0;
+    count = cmd_tree_cursor_move_one_level_up (cmdtc, false);
+    return count + 2;   /* 2 is to accomodate ''>" & hyphen sign*/
+}
+
 
 /* This fn removes all the params from the params list whose len is not
         equal to 'len' provided that after removal there should be exactly one
@@ -518,7 +618,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
         case cmdt_cur_state_matching_leaf:
 
             /* Standard Validation Checks on Leaf */
-            if (clistd_validate_leaf (cmdtc->curr_param) != VALIDATION_SUCCESS) {
+            if (clistd_validate_leaf (cmdtc->curr_param) != LEAF_VALIDATION_SUCCESS) {
                 return cmdt_cursor_no_match_further;
             }
 
@@ -760,11 +860,6 @@ cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc) {
     while (dequeue_glthread_first(&cmdtc->matching_params_list)) ;
 }
 
-void
-cmdtc_show_complete_clis (cmd_tree_cursor_t *cmdtc) {
-
-}
-
 void 
 cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
 
@@ -784,14 +879,26 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     if (cmdtc->root == cmdtc->curr_param) return;
     if (!cli_cursor_is_at_end_of_line (cli)) return;
     if (cli_cursor_is_at_begin_of_line (cli)) return;
-    if (cmdtc->cmdtc_state != cmdt_cur_state_init) return;
+
+    /* Allow Mode when we are either in init state Or 
+        in multiple match state but with i_cursor index as 0 which
+        means, user has multiple options to choose from, but not yet
+        typed a single character yet*/
+    if ( ! ((cmdtc->cmdtc_state == cmdt_cur_state_init) ||
+            (cmdtc->cmdtc_state == cmdt_cur_state_multiple_matches &&
+                cmdtc->icursor == 0))) return;
+
+    /* No point in going into Mode if we are at bottom of the cmd tree*/
     if (cmdtc_is_cursor_at_bottom_mode_node (cmdtc)) return;
 
+    /* Drain the complete stack temporarily, we will rebuilt it as it is*/
     while ((param = (param_t *)pop (cmdtc->stack))) {
         assert (!IS_QUEUED_UP_IN_THREAD (&param->glue));
         glthread_add_next (&temp_list, &param->glue);
     }
 
+    /* Now prepare the new CLI hdr which is DEF HDR + 
+        path from root to current level in cmd-tree*/
     cli_complete_reset (cli);
     unsigned char *buffer = cli_get_cli_buffer (cli, NULL);
     
@@ -815,24 +922,27 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
         }
     }ITERATE_GLTHREAD_END(&temp_list, curr) 
 
+    /* Adjust the prompt characters */
     buffer[byte_count - 1] = '>';
     buffer[byte_count] = ' ';
     byte_count++;
 
     cli_set_hdr (cli, NULL, byte_count);
 
-    /* Prepare the stack again*/
+    /* Rebuild  the stack again, thanks you stack !*/
     while ((curr = dequeue_glthread_first (&temp_list))) {
 
          param = glue_to_param (curr);
          push (cmdtc->stack , (void *)param);
     }
 
-    /* Save the contect of where we are now in CLI tree*/
+    /* Save the context of where we are now in CLI tree by updating the root,
+        and checkpoint the stack and TLV buffer  */
     cmdtc->root = cmdtc->curr_param;
     serialize_buffer_mark_checkpoint (cmdtc->tlv_buffer);
     cmdtc->stack_checkpoint = cmdtc->stack->top;
 
+    /* Finally display the new  prompt to the user */
     cli_printsc (cli, true);
 }
 
@@ -889,7 +999,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
     }
     cmdtc->success = true;
 
-    int tlv_buffer_original_size = tlv_buffer_get_size (cmdtc->tlv_buffer);
+    int tlv_buffer_original_size = serialize_buffer_get_size (cmdtc->tlv_buffer);
     int tlv_buffer_checkpoint_offset = serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer);
 
     if (cmdtc_is_this_config_command (cmdtc)) {
@@ -969,7 +1079,7 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
             return;
         case cmdt_cur_state_matching_leaf:
             /* Standard Validation Checks on Leaf */
-            if (clistd_validate_leaf (cmdtc->curr_param) != VALIDATION_SUCCESS) {
+            if (clistd_validate_leaf (cmdtc->curr_param) != LEAF_VALIDATION_SUCCESS) {
 
                 attron(COLOR_PAIR(RED_ON_BLACK));
                 printw ("\nError : value %s do not comply with expected data type : %s", 
@@ -1118,8 +1228,13 @@ cmdtc_parse_full_command (cli_t *cli) {
 
         if (IS_PARAM_LEAF(param)) {
 
-            if (clistd_validate_leaf (param) != VALIDATION_SUCCESS) {
+            /* Temporarily store leaf value in param, as in line-mode we dont really store CLI
+                values in CmTree params*/
+            strncpy (GET_LEAF_VALUE_PTR (param), *(tokens + i), strlen (*(tokens + i)));
 
+            if (clistd_validate_leaf (param) != LEAF_VALIDATION_SUCCESS) {
+
+                memset (GET_LEAF_VALUE_PTR (param), 0, LEAF_VALUE_HOLDER_SIZE);
                 attron(COLOR_PAIR(RED_ON_BLACK));
                 printw ("\nError : value %s do not comply with expected data type : %s", 
                     *(tokens + i),
@@ -1129,9 +1244,11 @@ cmdtc_parse_full_command (cli_t *cli) {
                 return false;
             } 
 
+            memset (GET_LEAF_VALUE_PTR (param), 0, LEAF_VALUE_HOLDER_SIZE);
+
             if (param->cmd_type.leaf->user_validation_cb_fn &&
                 (param->cmd_type.leaf->user_validation_cb_fn(
-                    cmdtc->tlv_buffer, (unsigned char *)*(tokens + i)) == VALIDATION_FAILED)) {
+                    cmdtc->tlv_buffer, (unsigned char *)*(tokens + i)) == LEAF_VALIDATION_FAILED)) {
                 
                 attron(COLOR_PAIR(RED_ON_BLACK));
                 printw ("\nCLI Error : User Validation Failed for value : %s", *(tokens + i));

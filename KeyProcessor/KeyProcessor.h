@@ -83,4 +83,10 @@ cli_screen_bottom_msg_display (unsigned char *msg, int msg_size, bool display);
 cli_history_t *
 cli_get_default_history ();
 
-#endif
+void
+cli_append_char (cli_t *default_cli, unsigned char ch, bool move_cursor) ;
+
+void
+cli_remove_trailing_char (cli_t *default_cli, bool move_cursor) ;
+
+ #endif

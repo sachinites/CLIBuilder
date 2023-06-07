@@ -262,8 +262,8 @@ void cli_printsc (cli_t *cli, bool next_line) {
 void
 cli_debug_print_stats (cli_t *cli) {
 
-    printw("\n%s", cli->clibuff);
-    printw ("\ncurr pos =  %d, start pos = %d, end_pos = %d, cnt = %d\n", 
+    //printw("\n%s", cli->clibuff);
+    printw ("\ncurr pos =  %d, start pos = %d, end_pos = %d, cnt = %d", 
         cli->current_pos, cli->start_pos, cli->end_pos, cli->cnt);
 }
 
@@ -413,7 +413,7 @@ cli_screen_bottom_msg_display (unsigned char *msg, int msg_size, bool display) {
 void
 cli_process_key_interrupt(int ch)
 {
-    int i;
+    int i, bs_count;
     cmdt_cursor_op_res_t rc;
 
     switch (ch)
@@ -466,6 +466,34 @@ cli_process_key_interrupt(int ch)
         cli_screen_cursor_move_cursor_right(default_cli->end_pos - default_cli->current_pos);
         default_cli->current_pos = default_cli->end_pos;
         break;
+    case KEY_PPAGE: /* Page UP*/
+        if (!cli_cursor_is_at_begin_of_line (default_cli)) break;
+        if (!cli_is_char_mode_on ()) break;
+        bs_count = cmdtc_process_pageup_event (default_cli->cmdtc);
+        i = bs_count; 
+        if (bs_count) {
+            while (bs_count--) {
+                cli_remove_trailing_char (default_cli , true);
+            }
+        }
+        if (i == 0) break; /* We are already at the apex root */
+        /* This page up event has caused us to reach apex root level, We just need
+            to print one space only, find through exp, dont think too much !! */
+        if (cmdtc_is_cursor_at_apex_root (default_cli->cmdtc)) {
+            cli_append_char (default_cli, ' ', true);
+            default_cli->start_pos += 1;
+            break;
+        }
+        cli_append_char (default_cli, '>', false);
+        printw(">");
+        cli_append_char (default_cli, ' ', false);
+        printw(" ");
+        default_cli->start_pos += 2;
+        break;    
+    case KEY_NPAGE: /* Page Down, used for debugging purpose*/
+        cli_debug_print_stats (default_cli);
+        cmdtc_debug_print_stats(default_cli->cmdtc);
+        break;
     /* Need to be careful with Backspace key as its ascii code varies on different systems*/
     case KEY_BACKSPACE:  /*On Linux Platform, BS has ascii code of 263*/
     case KEY_BACKSPACE_MOBAXTERM: /* On Windows, BS has ascii code of 8*/
@@ -476,7 +504,7 @@ cli_process_key_interrupt(int ch)
 
             /* in Char mode we are always at the end of line*/
             assert(cli_cursor_is_at_end_of_line (default_cli));
-            int bs_count = cmd_tree_cursor_move_one_level_up (default_cli->cmdtc, true);
+            bs_count = cmd_tree_cursor_move_one_level_up (default_cli->cmdtc, true);
             if (bs_count) {
                 cli_screen_cursor_move_cursor_left (bs_count, true);
                 while (bs_count--) {
@@ -490,13 +518,17 @@ cli_process_key_interrupt(int ch)
 
         /* If we are in line mode */
         /* Case 2 : if we are at the end of line*/
-        else if (default_cli->current_pos == default_cli->end_pos)
+        else if (cli_cursor_is_at_end_of_line (default_cli))
         {
+            #if 0
+            cli_remove_trailing_char(default_cli, true);
+            #else
             default_cli->current_pos--;
             default_cli->end_pos--;
             default_cli->cnt--;
             default_cli->clibuff[default_cli->current_pos] = '\0';
             cli_screen_cursor_move_cursor_left(1, true);
+            #endif
         }
 
         /* Case 3 : we are in the middle of the line */
@@ -517,7 +549,7 @@ cli_process_key_interrupt(int ch)
         break;
     case KEY_DC: /* delete key is pressed */
         /* Case 1 : if we are at the beginning or middle of the line */
-        if (default_cli->current_pos != default_cli->end_pos)
+        if (!cli_cursor_is_at_end_of_line (default_cli))
         {
 
             cli_content_shift_left(default_cli);
@@ -532,7 +564,7 @@ cli_process_key_interrupt(int ch)
         }
 
         /* Case 2 : if we are at the end of line*/
-        else if (default_cli->current_pos == default_cli->end_pos)
+        else if (cli_cursor_is_at_end_of_line (default_cli))
         {
             break;
         }
@@ -572,7 +604,7 @@ cli_process_key_interrupt(int ch)
         default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_cbc);
         break;
     case KEY_RIGHT:
-        if (default_cli->current_pos == default_cli->end_pos)
+        if (cli_cursor_is_at_end_of_line (default_cli))
             break;
         cli_screen_cursor_move_cursor_right(1);
         default_cli->current_pos++;
@@ -644,10 +676,14 @@ cli_process_key_interrupt(int ch)
                 /* This code will be returned when the user has pressed ' ' after typing out the
                     value of a leaf in cli*/
                    if (cli_cursor_is_at_end_of_line(default_cli)) {
+                    #if 0
+                        cli_append_char (default_cli, ch, true);
+                    #else
                         default_cli->clibuff[default_cli->current_pos++] = (char)ch;
                         default_cli->end_pos++;
                         default_cli->cnt++;
                         printw(" ");
+                    #endif
                    }
                    else {
                         cli_content_shift_right(default_cli);
@@ -662,10 +698,14 @@ cli_process_key_interrupt(int ch)
             case cmdt_cursor_done_auto_completion:
                 /* print the blank character, take care that we might be typing not in the end*/
                     if (cli_cursor_is_at_end_of_line(default_cli)) {
+                    #if 0
+                        cli_append_char (default_cli, ch, true);
+                    #else 
                         default_cli->clibuff[default_cli->current_pos++] = (char)ch;
                         default_cli->end_pos++;
                         default_cli->cnt++;
                         printw(" ");
+                    #endif
                    }
                    else {
                         cli_content_shift_right(default_cli);
@@ -683,19 +723,19 @@ cli_process_key_interrupt(int ch)
         }
         break;
     /* Put all the probable fall-through to default cases here*/
-    case '?':
+    case SUBOPTIONS_CHARACTER:
             if (cli_is_char_mode_on() &&
                     cli_is_prev_char (default_cli, ' ')) {
-                cmdtc_process_question_mark(default_cli->cmdtc);
+                cmdtc_process_question_mark (default_cli->cmdtc);
                 break;
             }
-    case '/':
+    case MODE_CHARACTER:
             if (cli_is_char_mode_on() &&
                      cli_is_prev_char (default_cli, ' ')) {
                 cmd_tree_enter_mode (default_cli->cmdtc);
                 break;
             }
-    case '.':
+    case CMD_EXPANSION_CHARACTER:
             if (cli_is_char_mode_on() &&
                      cli_is_prev_char (default_cli, ' ')) {
                 printw("\n");
@@ -712,9 +752,13 @@ cli_process_key_interrupt(int ch)
             switch (rc)
             {
             case cmdt_cursor_ok:
+            #if 0
+                cli_append_char (default_cli, ch, false);
+            #else
                 default_cli->clibuff[default_cli->current_pos++] = (char)ch;
                 default_cli->end_pos++;
                 default_cli->cnt++;
+            #endif
                 printw("%c", ch);
                 break;
             case cmdt_cursor_no_match_further:
@@ -771,3 +815,29 @@ cli_start_shell () {
     }
 }
 
+void
+cli_append_char (cli_t *default_cli, unsigned char ch, bool move_cursor)  {
+
+    assert (cli_cursor_is_at_end_of_line(default_cli));
+    assert (default_cli->current_pos >= default_cli->start_pos);
+    default_cli->clibuff[default_cli->current_pos++] = ch;
+    default_cli->cnt++;
+    default_cli->end_pos++;
+    if (move_cursor) {
+        cli_screen_cursor_move_cursor_right (1);
+    }
+}
+
+void
+cli_remove_trailing_char (cli_t *default_cli, bool move_cursor) {
+
+    assert (cli_cursor_is_at_end_of_line(default_cli));
+    assert (default_cli->current_pos >= default_cli->start_pos);
+    default_cli->clibuff[--default_cli->end_pos] = '\0';
+    default_cli->cnt--;
+    default_cli->current_pos--;
+    if (default_cli->end_pos < default_cli->start_pos) default_cli->start_pos--;
+    if (move_cursor) {
+        cli_screen_cursor_move_cursor_left  (1, true);
+    }
+}

@@ -27,9 +27,9 @@ void serialize_double(ser_buff_t *b, double data);
 void serialize_string(ser_buff_t *b, char *data, int size);
 char is_serialized_buffer_empty(ser_buff_t *b);
 /* get functions*/
-int  tlv_buffer_get_size(ser_buff_t *b);
+int  serialize_buffer_get_size(ser_buff_t *b);
 int get_serialize_buffer_current_ptr_offset(ser_buff_t *b);
-char *get_serialize_buffer_current_ptr(ser_buff_t *b);
+char *serialize_buffer_get_current_ptr(ser_buff_t *b);
 void serialize_buffer_skip(ser_buff_t *b, int size);
 void copy_in_serialized_buffer_by_offset(ser_buff_t *b, int size, char *value, int offset);
 
