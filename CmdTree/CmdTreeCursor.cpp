@@ -224,9 +224,16 @@ cmdtc_is_cursor_at_apex_root (cmd_tree_cursor_t *cmdtc) {
     return rc;
 }
 
-/* Fn to move the cursor one level up in the cmd tree.*/
+/* Fn to move the cursor one level up in the cmd tree. Note that this fn is called to implement BackSpace and Page UP
+In case of BackSpace, we would not like to lower down the checkpoints and update root
+In case of of Page UP, we would like to update checkpoints as well as root. Hence, pass
+boolean flags to control the relevant updates.
+*/
 int
-cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoint)  {
+cmd_tree_cursor_move_one_level_up (
+            cmd_tree_cursor_t *cmdtc,
+            bool honor_checkpoint,
+            bool update_root)  {
 
     int count = 0;
 
@@ -250,7 +257,11 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
             count += 1; /* +1 is to accomo*/
             cmdtc->curr_param = (isStackEmpty (cmdtc->stack)) ?  \
                 libcli_get_root_hook() : (param_t *)StackGetTopElem(cmdtc->stack);
-            cmdtc->root = cmdtc->curr_param;
+            
+            /* This fn is called for PAGE_UP and BACKSPACE. We need to update root
+                only in case of PAGE_UP only*/
+            if (update_root) cmdtc->root = cmdtc->curr_param;
+
            /* Lower down the checkpoint of the serialized buffer. */
             if (serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer) == 
                     serialize_buffer_get_size (cmdtc->tlv_buffer)) {
@@ -274,7 +285,7 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc, bool honor_checkpoi
             if (count == 0) {
             /* User has not typed a single character while he has multiple options to choose
                 from. In this case, move one level up*/
-                return cmd_tree_cursor_move_one_level_up (cmdtc, honor_checkpoint);
+                return cmd_tree_cursor_move_one_level_up (cmdtc, honor_checkpoint, update_root);
             }
             break;        
         case cmdt_cur_state_single_word_match: 
@@ -307,7 +318,7 @@ cmdtc_process_pageup_event (cmd_tree_cursor_t *cmdtc) {
     int count;
 
     if (isStackEmpty (cmdtc->stack)) return 0;
-    count = cmd_tree_cursor_move_one_level_up (cmdtc, false);
+    count = cmd_tree_cursor_move_one_level_up (cmdtc, false, true);
     return count + 2;   /* 2 is to accomodate ''>" & hyphen sign*/
 }
 
