@@ -21,10 +21,7 @@ bool
 cmdtc_get_cmd_trigger_status (cmd_tree_cursor_t *cmdtc);
 
 cmd_tree_cursor_t *
-cmdtc_tree_get_cursor (cmdtc_cursor_type_t cmdtc_type);
-
-cmdtc_cursor_type_t
-cmdtc_get_type (cmd_tree_cursor_t *cmdtc);
+cmdtc_tree_get_cursor ();
 
 void 
 cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) ;
@@ -83,5 +80,8 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc);
 
 void
 cmdtc_reconstuct_cli_buffer (cli_t *cli, cmd_tree_cursor_t *cmdtc);
+
+bool 
+cmdtc_is_stack_empty (Stack_t *stack);
 
 #endif 

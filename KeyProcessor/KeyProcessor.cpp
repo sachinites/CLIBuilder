@@ -129,7 +129,7 @@ cli_is_same (cli_t *cli1, cli_t *cli2) {
 static cli_t *cli_clone (cli_t *cli) {
 
     param_t *param;
-    int top = 0, rc = 0;
+    int top = 1, rc = 0;
     Stack_t *stack;
     cli_t *new_cli = (cli_t *)calloc (1, sizeof (cli_t));
     rc = strlen (DEF_CLI_HDR);
@@ -193,12 +193,9 @@ void
 cli_key_processor_init () {
 
     default_cli = (cli_t *)calloc (1, sizeof(cli_t));
-
     cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, (uint8_t) strlen (DEF_CLI_HDR));
-
     cmd_tree_init ();
-    default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_cbc);
-
+    default_cli->cmdtc = cmdtc_tree_get_cursor ();
     default_cli_history_list = (cli_history_t *)calloc (1, sizeof (cli_history_t));
     default_cli_history_list->curr_ptr = NULL;
 
@@ -217,7 +214,6 @@ cli_key_processor_init () {
     init_pair(PLAYER_PAIR, COLOR_RED, COLOR_MAGENTA);
     init_pair(RED_ON_BLACK, COLOR_RED, COLOR_BLACK);
     init_pair(GREEN_ON_BLACK, COLOR_GREEN, COLOR_BLACK);
-
 }
 
 void
@@ -445,7 +441,7 @@ cli_process_key_interrupt(int ch)
         /* Come out of line-mode if working in that mode*/
         keyp_char_mode = true;
         MODE_MSG_DISPLAY;
-        default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_cbc);
+        default_cli->cmdtc = cmdtc_tree_get_cursor ();
         /* Reset the cursor to point to apex-root*/
         cmdtc_reset_cursor (default_cli->cmdtc);
         break;
