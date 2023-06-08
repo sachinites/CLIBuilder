@@ -92,4 +92,10 @@ cli_remove_trailing_char (cli_t *default_cli, bool move_cursor) ;
 void 
 cli_sanity_check (cli_t *cli) ;
 
+bool 
+cli_is_historical (cli_t *cli);
+
+cmd_tree_cursor_t *
+cli_get_cmd_tree_cursor (cli_t *cli) ;
+
  #endif

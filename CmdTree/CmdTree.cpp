@@ -161,6 +161,13 @@ static void
         libcli_register_param(hook, &help);
         set_param_cmd_code(&help, SHOW_CLI_HELP);
     }
+    {
+        /*show history*/
+        static param_t history;
+        init_param (&history, CMD, "history", show_history_handler, NULL, INVALID, NULL, "CLI history");
+        libcli_register_param(hook, &history);
+        set_param_cmd_code(&history, SHOW_CLI_HISTORY);        
+    }
  }
 
 void 

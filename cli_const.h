@@ -16,6 +16,7 @@
 #define CHILDREN_END_INDEX      (MAX_OPTION_SIZE -1)
 #define TLV_MAX_BUFFER_SIZE     1024
 #define POSSIBILITY_ARRAY_SIZE  10
+#define CLI_HDR_MAX_SIZE    32
 
 #define KEY_BACKSPACE_MOBAXTERM 8 /* I found, in MobaXterm on Windows, BS has ascii of 8*/
 #define KEY_ASCII_TAB   9

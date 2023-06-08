@@ -78,4 +78,10 @@ cmdtc_process_pageup_event (cmd_tree_cursor_t *cmdtc);
 void
 cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc);
 
+ bool 
+ cmdtc_am_i_working_in_mode (cmd_tree_cursor_t *cmdtc) ;
+
+void
+cmdtc_reconstuct_cli_buffer (cli_t *cli, cmd_tree_cursor_t *cmdtc);
+
 #endif 

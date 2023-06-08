@@ -31,7 +31,7 @@ list_vlans(param_t *param, ser_buff_t *tlv_buf){
     unsigned int i = 1;
     for(; i <= 10; i++){
 
-        printw("\n%d", i);
+        printf("\n%d", i);
     }
 }
 
@@ -76,7 +76,7 @@ user_vlan_validation_callback(ser_buff_t *ser_buff, char *vlan_id){
     if(vlan_no > 0 && vlan_no < 4096)
         return 0;
 
-    printw("\nInvalid vlan. Pls follow Help\n");
+    printf("\nInvalid vlan. Pls follow Help\n");
     return -1;
 }
 

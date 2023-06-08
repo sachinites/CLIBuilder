@@ -1,6 +1,8 @@
 #ifndef __LIBCLI__
 #define __LIBCLI__
 
+#define printf printw
+
 #include "KeyProcessor/KeyProcessor.h"
 #include "CmdTree/CmdTree.h"
 #include "cmdtlv.h"

@@ -179,3 +179,9 @@ show_help_handler(param_t *param, ser_buff_t *b, op_mode enable_or_disable){
     attroff(COLOR_PAIR(PLAYER_PAIR));
     return 0;
 }
+
+int
+show_history_handler (param_t *param, ser_buff_t *ser_buff, op_mode enable_or_disable) {
+
+    return 0;
+}

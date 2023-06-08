@@ -37,7 +37,6 @@ typedef struct cli_history_ {
 static cli_t *default_cli = NULL;
 static cli_t *cli_store = NULL;
 static cli_history_t *default_cli_history_list = NULL;
-
 static bool keyp_char_mode = true;
 
 bool 
@@ -150,6 +149,18 @@ static cli_t *cli_clone (cli_t *cli) {
     new_cli->end_pos =  new_cli->cnt;
     return new_cli;
 }   
+
+bool 
+cli_is_historical (cli_t *cli) {
+    
+    return default_cli_history_list->curr_ptr == cli;
+}
+
+cmd_tree_cursor_t *
+cli_get_cmd_tree_cursor (cli_t *cli)  {
+
+    return cli->cmdtc;
+}
 
 void 
 cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
@@ -584,12 +595,12 @@ cli_process_key_interrupt(int ch)
         }
         else
         {
+            /* CLI is being picked up from history. Historical CLIs do
+                not have cmdtc*/
             cli_screen_cursor_save_screen_pos(default_cli);
             move(default_cli->row_store, default_cli->end_pos);
             assert(!default_cli->cmdtc);
-            default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
             cli_submit(default_cli);
-            default_cli->cmdtc = NULL;
             assert(cli_store);
             default_cli = cli_store;
             cli_store = NULL;
@@ -599,7 +610,7 @@ cli_process_key_interrupt(int ch)
         }
         keyp_char_mode = true;
         MODE_MSG_DISPLAY;
-        default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_cbc);
+        assert(default_cli->cmdtc);
         break;
     case KEY_RIGHT:
         if (cli_cursor_is_at_end_of_line (default_cli))
@@ -807,7 +818,7 @@ cli_start_shell () {
                 keyp_char_mode = false;
                 /* Reset the cmd tree cbc cursor to be used for next command now afresh*/
                 cmd_tree_cursor_reset_for_nxt_cmd (default_cli->cmdtc);
-                default_cli->cmdtc = NULL;
+                //default_cli->cmdtc = NULL;
                 MODE_MSG_DISPLAY;
             }
         }

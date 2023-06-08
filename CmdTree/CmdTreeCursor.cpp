@@ -1203,13 +1203,13 @@ cmdtc_parse_full_command (cli_t *cli) {
     int token_cnt;
     tlv_struct_t tlv;
     param_t *param;
+    bool is_new_cmdtc;
     char** tokens = NULL;
     cmd_tree_cursor_t *cmdtc;
 
     cli_sanity_check (cli);
-
-    cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
-   
+    is_new_cmdtc = false;
+  
     re_init_tokens(MAX_CMD_TREE_DEPTH);
 
     unsigned char *cmd = cli_get_user_command(cli, &cmd_size);
@@ -1225,6 +1225,24 @@ cmdtc_parse_full_command (cli_t *cli) {
         return false;
     }
 
+    /* If we have picked up the CLI from history, then take a new temp cursor. 
+        We only need to use its stack and TLV buffer */
+    if (cli_is_historical (cli)) {
+        cmd_tree_cursor_init (&cmdtc, cmdtc_type_cbc);
+        is_new_cmdtc = true;
+    }
+    else {
+        /* The user is working in line mode with default_cli only which is tied to a
+            cursor. Could be possible that user is working in Mode. We will use this
+            cursor stack and TLV buffer now since we would need checkpointed data
+            to fire the CLI
+            Consider below scenatio, assume user is woring in line mode 
+            Soft-Firewall>$ config-mtrace-source> 1.1.1.1 destination 2.2.2.2
+            */
+        cmdtc = cli_get_cmd_tree_cursor (cli);
+        assert (cmdtc);
+    }
+
     param = cmdtc->root;
 
     for (i= 0; i < token_cnt; i++) {
@@ -1236,6 +1254,10 @@ cmdtc_parse_full_command (cli_t *cli) {
             printw ("\nCLI Error : Unrecognized Param : %s", *(tokens + i));
             attroff(COLOR_PAIR(RED_ON_BLACK));
             cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
+            if (is_new_cmdtc) {
+                cmd_tree_cursor_deinit (cmdtc);
+                free(cmdtc);
+            }
             return false;
         }
 
@@ -1256,6 +1278,10 @@ cmdtc_parse_full_command (cli_t *cli) {
                     GET_LEAF_TYPE_STR(param));
                 attroff(COLOR_PAIR(RED_ON_BLACK));
                 cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
+                if (is_new_cmdtc) {
+                    cmd_tree_cursor_deinit(cmdtc);
+                    free(cmdtc);
+                }
                 return false;
             } 
 
@@ -1269,6 +1295,10 @@ cmdtc_parse_full_command (cli_t *cli) {
                 printw ("\nCLI Error : User Validation Failed for value : %s", *(tokens + i));
                 attroff(COLOR_PAIR(RED_ON_BLACK));
                 cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
+                if (is_new_cmdtc) {
+                    cmd_tree_cursor_deinit(cmdtc);
+                    free(cmdtc);
+                }
                 return false;
             }
 
@@ -1285,9 +1315,26 @@ cmdtc_parse_full_command (cli_t *cli) {
 
     /* Set the last param which holds the callback*/
     cmdtc->curr_param = param; 
-    cmd_tree_trigger_cli(cmdtc);
-    if (cmdtc->success) {  cmd_tree_post_cli_trigger (cli);   }
+    cmd_tree_trigger_cli (cmdtc);
+
+    if (cmdtc->success) { 
+
+        if (!is_new_cmdtc) {
+
+            /* Because we would need to store the history of this CLI, we need
+                to reconstruct the cli->clibuff before storing*/
+            cmdtc_reconstuct_cli_buffer (cli, cmdtc);
+        }
+
+        cmd_tree_post_cli_trigger (cli);   
+    }
+
     cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
+
+    if (is_new_cmdtc) {
+        cmd_tree_cursor_deinit(cmdtc);
+        free(cmdtc);
+    }
     return true;
 }
 
@@ -1305,3 +1352,15 @@ cmdtc_display_all_complete_commands (cmd_tree_cursor_t *cmdtc) {
 
         cmd_tree_display_all_complete_commands (cmdtc->curr_param, 0);
  }
+
+ bool 
+ cmdtc_am_i_working_in_mode (cmd_tree_cursor_t *cmdtc) {
+
+    return (cmdtc->stack_checkpoint > -1);
+ }
+
+ void
+cmdtc_reconstuct_cli_buffer (cli_t *cli, cmd_tree_cursor_t *cmdtc) {
+
+
+}
