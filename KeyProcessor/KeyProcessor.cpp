@@ -90,7 +90,7 @@ key_processor_should_enter_line_mode (int key) {
 }
 
 static int
-cli_application_process (cli_t *cli) {
+cli_submit (cli_t *cli) {
 
     int ret = -1;
     bool parse_rc = true;
@@ -104,11 +104,12 @@ cli_application_process (cli_t *cli) {
         if (1 || cmdtc_get_cmd_trigger_status (cli->cmdtc)) ret = 0;
     }
     else {
-
+        /* If the historical cmd is modified, then current pos may be diff from end pos, sync it*/
+        cli->current_pos = cli->end_pos;
          parse_rc = cmdtc_parse_full_command(cli);
          if (parse_rc &&         /* if the cmd syntactically has been parsed successfully in line mode*/
             default_cli_history_list->curr_ptr == NULL &&     /* if it is not a historical cmd*/
-            (1 || cmdtc_get_cmd_trigger_status (cli->cmdtc))) { /* Ithe application returned success*/
+            (1 || cmdtc_get_cmd_trigger_status (cli->cmdtc))) { /* If the application returned success*/
         
             ret = 0;
         }
@@ -144,7 +145,7 @@ static cli_t *cli_clone (cli_t *cli) {
             GET_LEAF_VALUE_PTR(param));
         top++;
     }
-    new_cli->cnt += rc;
+    new_cli->cnt = rc;
     new_cli->current_pos = new_cli->cnt;
     new_cli->end_pos =  new_cli->cnt;
     return new_cli;
@@ -467,6 +468,7 @@ cli_process_key_interrupt(int ch)
         default_cli->current_pos = default_cli->end_pos;
         break;
     case KEY_PPAGE: /* Page UP*/
+    case ctrl(']'):
         if (!cli_cursor_is_at_begin_of_line (default_cli)) break;
         if (!cli_is_char_mode_on ()) break;
         bs_count = cmdtc_process_pageup_event (default_cli->cmdtc);
@@ -576,9 +578,7 @@ cli_process_key_interrupt(int ch)
         {
             cli_screen_cursor_save_screen_pos(default_cli);
             move(default_cli->row_store, default_cli->end_pos);
-            if (!cli_application_process(default_cli)) {
-                // cli_record_copy(default_cli_history_list, default_cli);
-            }
+            cli_submit(default_cli);
             cli_content_reset(default_cli);
             cli_printsc(default_cli, true);
         }
@@ -588,9 +588,7 @@ cli_process_key_interrupt(int ch)
             move(default_cli->row_store, default_cli->end_pos);
             assert(!default_cli->cmdtc);
             default_cli->cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
-            if (!cli_application_process(default_cli)) {
-                // cli_record_copy(default_cli_history_list, default_cli);
-            }
+            cli_submit(default_cli);
             default_cli->cmdtc = NULL;
             assert(cli_store);
             default_cli = cli_store;
@@ -610,9 +608,9 @@ cli_process_key_interrupt(int ch)
         default_cli->current_pos++;
         break;
     case KEY_LEFT:
-        if (default_cli->current_pos == default_cli->start_pos)
+         if (cli_cursor_is_at_begin_of_line (default_cli))
             break;
-        cli_screen_cursor_move_cursor_left(1, false);
+        cli_screen_cursor_move_cursor_left (1, false);
         default_cli->current_pos--;
         break;
     case KEY_UP:
@@ -801,6 +799,8 @@ cli_start_shell () {
     
         ch = getch();
 
+        if (default_cli->cnt == MAX_COMMAND_LENGTH) continue;
+
         if (cli_is_char_mode_on()) {
 
             if (key_processor_should_enter_line_mode (ch)) {
@@ -840,4 +840,11 @@ cli_remove_trailing_char (cli_t *default_cli, bool move_cursor) {
     if (move_cursor) {
         cli_screen_cursor_move_cursor_left  (1, true);
     }
+}
+
+void 
+cli_sanity_check (cli_t *cli) {
+
+    assert (cli->current_pos == cli->end_pos);
+    assert (cli->cnt == cli->end_pos);
 }

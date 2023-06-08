@@ -117,6 +117,8 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc) {
    tlv_struct_t *top_tlv = NULL;
    char *tlv_top_name = NULL;
 
+    if (!cmdtc) return;
+
     param_t *param_top = (param_t *)StackGetTopElem (cmdtc->stack);
   
     if (!is_serialized_buffer_empty (cmdtc->tlv_buffer)) {
@@ -1204,6 +1206,8 @@ cmdtc_parse_full_command (cli_t *cli) {
     char** tokens = NULL;
     cmd_tree_cursor_t *cmdtc;
 
+    cli_sanity_check (cli);
+    
     cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
    
     re_init_tokens(MAX_CMD_TREE_DEPTH);

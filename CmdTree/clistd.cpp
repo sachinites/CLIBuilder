@@ -168,9 +168,10 @@ show_help_handler(param_t *param, ser_buff_t *b, op_mode enable_or_disable){
     printw("3. Use %c Character after the command to see possible complete command completions\n", CMD_EXPANSION_CHARACTER);
     printw("4. [ ctrl + l ] - clear screen\n");
     printw("5. [ ctrl + t ] - jump to top of cmd tree\n");
-    printw("6. [ BackSpace ] - jump one level up of command tree\n");
-    printw("7. config [ %s ] console name <console name> - set/unset new console name\n", NEGATE_CHARACTER);
-    printw("8. [UP DOWN Arrow] - show the command history\n");
+    printw("6. [ BackSpace ] - Erase the last word\n");
+    printw("7. [ Page Up  Or  ctrl + ']' ] - Move one Level Up in the cmd tree\n");
+    printw("8. config [ %s ] console name <console name> - set/unset new console name\n", NEGATE_CHARACTER);
+    printw("9. [UP DOWN Arrow] - show the command history\n");
     attroff(COLOR_PAIR(GREEN_ON_BLACK));
     attron(COLOR_PAIR(PLAYER_PAIR));
     printw( "          Author : Abhishek Sagar\n");

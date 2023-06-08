@@ -89,4 +89,7 @@ cli_append_char (cli_t *default_cli, unsigned char ch, bool move_cursor) ;
 void
 cli_remove_trailing_char (cli_t *default_cli, bool move_cursor) ;
 
+void 
+cli_sanity_check (cli_t *cli) ;
+
  #endif
