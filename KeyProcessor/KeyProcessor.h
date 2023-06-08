@@ -78,7 +78,7 @@ void
 cli_process_key_interrupt(int ch);
 
 void
-cli_screen_bottom_msg_display (unsigned char *msg, int msg_size, bool display);
+cli_screen_operational_mode_display (unsigned char *msg, int msg_size, bool display);
 
 cli_history_t *
 cli_get_default_history ();

@@ -502,7 +502,7 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
         printw ("nxt cmd  -> %-31s   |   %s\n", 
             GET_CMD_NAME(param), 
             GET_PARAM_HELP_STRING(param));
-      
+
     } ITERATE_GLTHREAD_END (&cmdtc->matching_params_list, curr);
 
     if (cmdtc->leaf_param) {
@@ -1207,7 +1207,7 @@ cmdtc_parse_full_command (cli_t *cli) {
     cmd_tree_cursor_t *cmdtc;
 
     cli_sanity_check (cli);
-    
+
     cmdtc = cmdtc_tree_get_cursor (cmdtc_type_wbw);
    
     re_init_tokens(MAX_CMD_TREE_DEPTH);

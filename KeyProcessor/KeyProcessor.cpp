@@ -53,7 +53,7 @@ cli_get_default_history () {
 }
 
 #define MODE_MSG_DISPLAY    \
-    cli_screen_bottom_msg_display ( \
+    cli_screen_operational_mode_display ( \
                 (unsigned char *) (cli_is_char_mode_on() ? "Char-Mode" : "Line-Mode"), 0, false)
 
 static bool
@@ -402,7 +402,7 @@ cli_screen_enable_timestamp (cli_t *cli) {
 }
 
 void
-cli_screen_bottom_msg_display (unsigned char *msg, int msg_size, bool display) {
+cli_screen_operational_mode_display (unsigned char *msg, int msg_size, bool display) {
 
     int row, col;
     getyx(stdscr, row, col);
