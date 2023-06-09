@@ -162,6 +162,9 @@ cmdtc_reset_cursor (cmd_tree_cursor_t *cmdtc) {
 void 
 cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
 
+    if (cmdtc_am_i_working_in_mode (cmdtc)) {
+        cmd_tree_uninstall_universal_params (cmdtc->root);
+    }
     reset_stack (cmdtc->stack);
     push (cmdtc->stack, (void *)libcli_get_root_hook());
     cmdtc->stack_checkpoint = cmdtc->stack->top;
@@ -1067,7 +1070,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         return;
     }
 
-    cmdtc->success = true;
+    cli_cmdtc->success = true;
 
     int tlv_buffer_original_size = serialize_buffer_get_size (cmdtc->tlv_buffer);
     int tlv_buffer_checkpoint_offset = serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer);
@@ -1086,7 +1089,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         param = (param_t *)StackGetTopElem(cmdtc->stack);
 
         if (param->callback (param, cmdtc->tlv_buffer, enable_or_diable)) {
-            cmdtc->success = false;
+            cli_cmdtc->success = false;
         }
 
         if (temp_cmdtc) { cmd_tree_cursor_deinit(cmdtc); free(cmdtc); }
@@ -1107,7 +1110,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         cmdtc->tlv_buffer->next = tlv_buffer_checkpoint_offset + (sizeof (tlv_struct_t) * count);
         count++;
         if (param->callback (param, cmdtc->tlv_buffer, enable_or_diable)) {
-            cmdtc->success = false;
+            cli_cmdtc->success = false;
             break;
         }
     }

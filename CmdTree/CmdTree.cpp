@@ -343,9 +343,7 @@ bool
 cmd_tree_is_token_a_hook (char *token) {
 
     param_t *root = libcli_get_root_hook ();
-
     return (cmd_tree_find_matching_param (&root->options[0], token) != NULL); 
-
 }
 
 static param_t*

@@ -443,14 +443,13 @@ cli_process_key_interrupt(int ch)
             default_cli_history_list->curr_ptr = NULL;
         }
         cli_complete_reset(default_cli);
+        cmdtc_reset_cursor (default_cli->cmdtc);
         cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, strlen (DEF_CLI_HDR));
         cli_screen_cursor_reset_current_line();
         cli_printsc (default_cli, false);
         /* Come out of line-mode if working in that mode*/
         keyp_char_mode = true;
-        MODE_MSG_DISPLAY;
-        /* Reset the cursor to point to apex-root*/
-        cmdtc_reset_cursor (default_cli->cmdtc);
+        MODE_MSG_DISPLAY;        
         break;
     case ctrl('n'):
         if (cli_cursor_is_at_end_of_line(default_cli))
