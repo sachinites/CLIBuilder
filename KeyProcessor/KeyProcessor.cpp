@@ -29,7 +29,8 @@ typedef struct cli_ {
 
 typedef struct cli_history_ {
 
-    cli_t *cli_history_list;
+    cli_t *first;
+    cli_t *last;
     int count;  
     cli_t *curr_ptr;
 } cli_history_t;
@@ -107,7 +108,7 @@ cli_submit (cli_t *cli) {
         cli->current_pos = cli->end_pos;
          parse_rc = cmdtc_parse_full_command(cli);
          if (parse_rc &&         /* if the cmd syntactically has been parsed successfully in line mode*/
-            default_cli_history_list->curr_ptr == NULL &&     /* if it is not a historical cmd*/
+            !cli_is_historical (cli) &&  /* if it is not a historical cmd*/
             (1 || cmdtc_get_cmd_trigger_status (cli->cmdtc))) { /* If the application returned success*/
         
             ret = 0;
@@ -165,18 +166,26 @@ cli_get_cmd_tree_cursor (cli_t *cli)  {
 void 
 cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
 
-    if (cli_history->count ==  CLI_HISTORY_LIMIT) return;
     if (cli_is_buffer_empty (new_cli)) return;
     if (default_cli_history_list->curr_ptr == new_cli) return;
+    
 
     cli_t *cli = cli_clone (new_cli);
-    if (cli_history->cli_history_list == NULL) {
-        cli_history->cli_history_list = cli;
+    if (cli_history->first == NULL) {
+        cli_history->first = cli;
+        cli_history->last = cli;
         cli_history->count++;
         return;
     }
 
-    cli_t *first_cli = cli_history->cli_history_list;
+    if (cli_history->count ==  CLI_HISTORY_LIMIT) {
+        
+        cli_t *new_last = cli_history->last->prev;
+        free(new_last->next);
+        new_last->next = NULL;
+    }
+
+    cli_t *first_cli = cli_history->first;
 
     if (cli_is_same (cli, first_cli)) {
         free(cli);
@@ -185,7 +194,7 @@ cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
 
     cli->next = first_cli;
     first_cli->prev = cli;
-    cli_history->cli_history_list = cli;
+    cli_history->first = cli;
     cli_history->count++;
 }
 
@@ -429,7 +438,6 @@ cli_process_key_interrupt(int ch)
     case ctrl('t'): // goto apex
         /* Come out of history browsing*/
         if (cli_store) {
-            cmdtc_reset_cursor (default_cli->cmdtc);
             default_cli = cli_store;
             cli_store = NULL;
             default_cli_history_list->curr_ptr = NULL;
@@ -441,7 +449,6 @@ cli_process_key_interrupt(int ch)
         /* Come out of line-mode if working in that mode*/
         keyp_char_mode = true;
         MODE_MSG_DISPLAY;
-        default_cli->cmdtc = cmdtc_tree_get_cursor ();
         /* Reset the cursor to point to apex-root*/
         cmdtc_reset_cursor (default_cli->cmdtc);
         break;
@@ -624,7 +631,7 @@ cli_process_key_interrupt(int ch)
         cli_screen_cursor_save_screen_pos(default_cli);
         if (default_cli_history_list->curr_ptr == NULL)
         {
-            default_cli_history_list->curr_ptr = default_cli_history_list->cli_history_list;
+            default_cli_history_list->curr_ptr = default_cli_history_list->first;
         }
         else
         {
@@ -814,7 +821,6 @@ cli_start_shell () {
                 keyp_char_mode = false;
                 /* Reset the cmd tree cbc cursor to be used for next command now afresh*/
                 cmd_tree_cursor_reset_for_nxt_cmd (default_cli->cmdtc);
-                //default_cli->cmdtc = NULL;
                 MODE_MSG_DISPLAY;
             }
         }
@@ -854,4 +860,16 @@ cli_sanity_check (cli_t *cli) {
 
     assert (cli->current_pos == cli->end_pos);
     assert (cli->cnt == cli->end_pos);
+}
+
+void
+cli_history_show () {
+
+    cli_t *cli = default_cli_history_list->first;
+
+    while (cli) {
+        printw ("\n%s", cli->clibuff);
+        cli = cli->next;
+    }
+    cli_printsc (default_cli, true);
 }

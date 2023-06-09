@@ -183,5 +183,6 @@ show_help_handler(param_t *param, ser_buff_t *b, op_mode enable_or_disable){
 int
 show_history_handler (param_t *param, ser_buff_t *ser_buff, op_mode enable_or_disable) {
 
+    cli_history_show ();
     return 0;
 }

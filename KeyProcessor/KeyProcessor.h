@@ -84,6 +84,9 @@ cli_history_t *
 cli_get_default_history ();
 
 void
+cli_history_show () ;
+
+void
 cli_append_char (cli_t *default_cli, unsigned char ch, bool move_cursor) ;
 
 void

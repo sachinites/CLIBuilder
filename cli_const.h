@@ -23,7 +23,7 @@
 #define KEY_ASCII_NEWLINE 10
 #define KEY_ASCII_SPACE   32
 
-#define CLI_HISTORY_LIMIT   10
+#define CLI_HISTORY_LIMIT   50
 
 #define NEGATE_CHARACTER "no"
 

@@ -162,7 +162,6 @@ cmdtc_reset_cursor (cmd_tree_cursor_t *cmdtc) {
 void 
 cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
 
-    glthread_t *curr;
     reset_stack (cmdtc->stack);
     push (cmdtc->stack, (void *)libcli_get_root_hook());
     cmdtc->stack_checkpoint = cmdtc->stack->top;
@@ -194,15 +193,6 @@ cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
     cmdtc->cmdtc_state = cmdt_cur_state_init;
     while (dequeue_glthread_first(&cmdtc->matching_params_list));
     cmdtc->leaf_param = NULL;
-}
-
-bool 
-cmdtc_is_this_config_command (cmd_tree_cursor_t *cmdtc) {
-
-    assert (!isStackEmpty (cmdtc->stack));
-    if (cmdtc_is_stack_empty (cmdtc->stack)) return false;
-    param_t *bottom_param = (param_t *)cmdtc->stack->slot[1];
-    return (bottom_param == libcli_get_config_hook());
 }
 
 bool 
@@ -252,7 +242,13 @@ cmd_tree_cursor_move_one_level_up (
             
             /* This fn is called for PAGE_UP and BACKSPACE. We need to update root
                 only in case of PAGE_UP only*/
-            if (update_root) cmdtc->root = cmdtc->curr_param;
+            if (update_root) {
+                cmd_tree_uninstall_universal_params (cmdtc->root);
+                cmdtc->root = cmdtc->curr_param;
+                if (cmdtc->root != libcli_get_root_hook()) {
+                    cmd_tree_install_universal_params (cmdtc->root, cmdtc_get_branch_hook (cmdtc));
+                }
+            }
 
            /* Lower down the checkpoint of the serialized buffer. */
             if (serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer) == 
@@ -879,6 +875,7 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     if (cmdtc->root == cmdtc->curr_param) return;
     if (!cli_cursor_is_at_end_of_line (cli)) return;
     if (cli_cursor_is_at_begin_of_line (cli)) return;
+    if (cmdtc_am_i_working_in_nested_mode(cmdtc)) return;
 
     /* Allow Mode when we are either in init state Or 
         in multiple match state but with i_cursor index as 0 which
@@ -937,12 +934,16 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
          push (cmdtc->stack , (void *)param);
     }
 
+    if (cmdtc->root != libcli_get_root_hook()) {
+        cmd_tree_uninstall_universal_params (cmdtc->root);
+    }
     /* Save the context of where we are now in CLI tree by updating the root,
         and checkpoint the stack and TLV buffer  */
     cmdtc->root = cmdtc->curr_param;
     serialize_buffer_mark_checkpoint (cmdtc->tlv_buffer);
     cmdtc->stack_checkpoint = cmdtc->stack->top;
 
+    cmd_tree_install_universal_params (cmdtc->root, cmdtc_get_branch_hook(cmdtc));
     /* Finally display the new  prompt to the user */
     cli_printsc (cli, true);
 }
@@ -982,13 +983,79 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
     cmdtc->leaf_param = NULL;
 }
 
+void
+cmdtc_display_all_complete_commands (cmd_tree_cursor_t *cmdtc) {
+
+        cmd_tree_display_all_complete_commands (
+                cmdtc->curr_param, 0, 
+                 cmdtc_am_i_working_in_nested_mode (cmdtc));
+ }
+
+ bool 
+ cmdtc_am_i_working_in_mode (cmd_tree_cursor_t *cmdtc) {
+
+    return (cmdtc->stack_checkpoint > 0);
+ }
+
+/* Nested mode is defined as the user typing out the cli starting from hook while he is already in mode. Note that, char mode should be on !
+Ex : Soft-Firewall>$ config-mtrace-source> show ip igmp configuration
+*/
+  bool 
+ cmdtc_am_i_working_in_nested_mode (cmd_tree_cursor_t *cmdtc)  {
+
+    if (!cli_is_char_mode_on()) return false;
+    if ( !cmdtc_am_i_working_in_mode (cmdtc)) return false;
+    if (cmdtc->stack->top == cmdtc->stack_checkpoint) return false;
+    return param_is_hook ((param_t *)cmdtc->stack->slot[cmdtc->stack_checkpoint + 1]);
+ }
+
+param_t *
+cmdtc_get_branch_hook (cmd_tree_cursor_t *cmdtc) {
+
+    if (cmdtc_is_stack_empty (cmdtc->stack)) return NULL;
+    return (param_t *)(cmdtc->stack->slot[1]);
+}
+
+/* CLI Trigger Code */
+
 static void 
-cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
+cmd_tree_post_cli_trigger (cli_t *cli) {
+
+    attron (COLOR_PAIR(GREEN_ON_BLACK));
+    printw ("\nParse Success\n");
+    attroff (COLOR_PAIR(GREEN_ON_BLACK));
+    cli_record_copy (cli_get_default_history(), cli);
+}
+
+/* This function eventually submit the CLI to the backend application */
+static void 
+cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
 
     int i;
     int count = 1;
     param_t *param;
+    cmd_tree_cursor_t *cmdtc;
     op_mode enable_or_diable;
+    cmd_tree_cursor_t *temp_cmdtc = NULL;
+   
+    /* if user is in nested mode, then we will use temporary cmdtc because
+        original cmdtc's stack and TLV buffer we dont want */
+    if ( cmdtc_am_i_working_in_nested_mode (cli_cmdtc)) {
+
+        cmd_tree_cursor_init (&temp_cmdtc);
+        cmdtc = temp_cmdtc;
+
+        /* Rebuild the stack and TLV buffer from scratch*/
+        for (i = cli_cmdtc->stack_checkpoint + 1 ; i <= cli_cmdtc->stack->top; i++) {
+            param = (param_t *) cli_cmdtc->stack->slot[i];
+            push (cmdtc->stack, (void *)param);
+            cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
+        }
+        cmdtc->curr_param = (param_t *) StackGetTopElem (cmdtc->stack);
+    }
+    else {
+        cmdtc = cli_cmdtc;
+    }
 
     /* Do not trigger the CLI if the user has not typed CLI to the
         completion*/
@@ -996,14 +1063,16 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
         attron(COLOR_PAIR(RED_ON_BLACK));
         printw("\nError : Incomplete CLI...");
         attroff(COLOR_PAIR(RED_ON_BLACK));
+        if (temp_cmdtc) { cmd_tree_cursor_deinit(cmdtc); free(cmdtc); }
         return;
     }
+
     cmdtc->success = true;
 
     int tlv_buffer_original_size = serialize_buffer_get_size (cmdtc->tlv_buffer);
     int tlv_buffer_checkpoint_offset = serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer);
 
-    if (cmdtc_is_this_config_command (cmdtc)) {
+    if (cmdtc_get_branch_hook (cmdtc) == libcli_get_config_hook()) {
         /* ToDo : Support Command Negation !*/
         enable_or_diable = CONFIG_ENABLE;
     }
@@ -1015,10 +1084,12 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
     if (enable_or_diable == OPERATIONAL) {
 
         param = (param_t *)StackGetTopElem(cmdtc->stack);
+
         if (param->callback (param, cmdtc->tlv_buffer, enable_or_diable)) {
             cmdtc->success = false;
-            return;
         }
+
+        if (temp_cmdtc) { cmd_tree_cursor_deinit(cmdtc); free(cmdtc); }
         return;
     }
 
@@ -1041,8 +1112,12 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cmdtc) {
         }
     }
     cmdtc->tlv_buffer->next = tlv_buffer_original_size;
+
+    if (temp_cmdtc) { cmd_tree_cursor_deinit(cmdtc); free(cmdtc); }
 }
 
+/* Fn to process user CLI when he press ENTER key while working in 
+    char mode */
 void
 cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
 
@@ -1104,85 +1179,11 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
     }
  }
 
-/* Below Fns are for prsing the command word by word*/
+
 static unsigned char command[MAX_COMMAND_LENGTH];
 
-static param_t*
-array_of_possibilities[POSSIBILITY_ARRAY_SIZE];
-
-static inline int
-is_cmd_string_match(param_t *param, const char *str, bool *ex_match){
-    
-    *ex_match = false;
-    int str_len = strlen(str);
-    int str_len_param = param->cmd_type.cmd->len;
-
-    int rc =  (strncmp(param->cmd_type.cmd->cmd_name, 
-                   str, str_len));
-
-    if ( !rc && (str_len == str_len_param )) {
-        *ex_match = true;
-    }
-    return rc;
-}
-
-param_t*
-find_matching_param (param_t **options, const char *cmd_name){
-    
-    int i = 0,
-         j = 0,
-        choice = -1,
-        leaf_index = -1;
-         
-    bool ex_match = false;
-    
-    memset(array_of_possibilities, 0, POSSIBILITY_ARRAY_SIZE * sizeof(param_t *));
-
-    for (; options[i] && i <= CHILDREN_END_INDEX; i++) {
-
-        if (IS_PARAM_LEAF(options[i])) {
-            leaf_index = i;
-            continue;
-        }
-
-        if (is_cmd_string_match(options[i], cmd_name, &ex_match) == 0) {
-
-            if (ex_match) {
-                 array_of_possibilities[ 0 ] = options[i];
-                 j = 1;
-                break;
-            }
-            array_of_possibilities[ j++ ] = options[i];
-            assert (j < POSSIBILITY_ARRAY_SIZE);
-            continue;
-        }
-    }
-
-    if(leaf_index >= 0 && j == 0)
-        return options[leaf_index];
-
-    if( j == 0)
-        return NULL;
-
-    if(j == 1)
-        return array_of_possibilities[0];
-
-    /* More than one param matched*/
-    printw("%d possibilities :\n", j);
-    for(i = 0; i < j; i++)
-        printw("%-2d. %s\n", i, GET_CMD_NAME(array_of_possibilities[i]));
-
-    printw("Choice [0-%d] : ? ", j-1);
-    scanw("%d", &choice);
-    
-    if(choice < 0 || choice > (j-1)){
-        printw("\nInvalid Choice");
-        return NULL;
-    }
-    return array_of_possibilities[choice];   
-}
-
-/* This fn parse the full command*/
+/* Fn to process user CLI when he press ENTER key while working in 
+    line mode */
 bool
 cmdtc_parse_full_command (cli_t *cli) {
 
@@ -1197,7 +1198,8 @@ cmdtc_parse_full_command (cli_t *cli) {
 
     cli_sanity_check (cli);
     is_new_cmdtc = false;
-  
+    assert (!cli_is_char_mode_on ());
+
     re_init_tokens(MAX_CMD_TREE_DEPTH);
 
     unsigned char *cmd = cli_get_user_command(cli, &cmd_size);
@@ -1213,12 +1215,22 @@ cmdtc_parse_full_command (cli_t *cli) {
         return false;
     }
 
-    /* If we have picked up the CLI from history, then take a new temp cursor. 
-        We only need to use its stack and TLV buffer */
+    /* Now Three Cases arises. Lets cover one by one and use cmdtc accordingly. */
+
+
+    /* Case 1 : If we have picked up the CLI from history, then take a new temp cursor.  We only need to use its stack and TLV buffer */
     if (cli_is_historical (cli)) {
         cmd_tree_cursor_init (&cmdtc);
         is_new_cmdtc = true;
     }
+    
+    /*Case 2 :  If in mode (line mode also), user has typed out the command starting from hook ( first token is a hook), then also take a new cmdtc because we dont need existing stack and TLV buffer*/
+    else if (cmd_tree_is_token_a_hook (*(tokens+ 0))) {
+        cmd_tree_cursor_init (&cmdtc);
+        is_new_cmdtc = true;
+    }
+    /* Case 3 : If the user is typing out the command while he is workign in mode from the
+        same mode level */
     else {
         /* The user is working in line mode with default_cli only which is tied to a
             cursor. Could be possible that user is working in Mode. We will use this
@@ -1235,7 +1247,7 @@ cmdtc_parse_full_command (cli_t *cli) {
 
     for (i= 0; i < token_cnt; i++) {
 
-        param = find_matching_param(&param->options[0], *(tokens +i));
+        param = cmd_tree_find_matching_param(&param->options[0], *(tokens +i));
 
         if (!param){
             attron(COLOR_PAIR(RED_ON_BLACK));
@@ -1317,31 +1329,4 @@ cmdtc_parse_full_command (cli_t *cli) {
         free(cmdtc);
     }
     return true;
-}
-
-void 
-cmd_tree_post_cli_trigger (cli_t *cli) {
-
-    attron (COLOR_PAIR(GREEN_ON_BLACK));
-    printw ("\nParse Success\n");
-    attroff (COLOR_PAIR(GREEN_ON_BLACK));
-    cli_record_copy (cli_get_default_history(), cli);
-}
-
-void
-cmdtc_display_all_complete_commands (cmd_tree_cursor_t *cmdtc) {
-
-        cmd_tree_display_all_complete_commands (cmdtc->curr_param, 0);
- }
-
- bool 
- cmdtc_am_i_working_in_mode (cmd_tree_cursor_t *cmdtc) {
-
-    return (cmdtc->stack_checkpoint > 0);
- }
-
- void
-cmdtc_reconstuct_cli_buffer (cli_t *cli, cmd_tree_cursor_t *cmdtc) {
-
-
 }

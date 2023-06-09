@@ -55,13 +55,7 @@ void
 cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) ;
 
 void 
-cmd_tree_post_cli_trigger (cli_t *cli);
-
-void 
 cmdtc_reset_cursor (cmd_tree_cursor_t *cmdtc);
-
-bool 
-cmdtc_is_this_config_command (cmd_tree_cursor_t *cmdtc);
 
 Stack_t *
 cmdtc_get_stack (cmd_tree_cursor_t *cmdtc);
@@ -78,10 +72,13 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc);
  bool 
  cmdtc_am_i_working_in_mode (cmd_tree_cursor_t *cmdtc) ;
 
-void
-cmdtc_reconstuct_cli_buffer (cli_t *cli, cmd_tree_cursor_t *cmdtc);
+ bool 
+ cmdtc_am_i_working_in_nested_mode (cmd_tree_cursor_t *cmdtc) ;
 
 bool 
 cmdtc_is_stack_empty (Stack_t *stack);
+
+param_t *
+cmdtc_get_branch_hook (cmd_tree_cursor_t *cmdtc);
 
 #endif 

@@ -87,6 +87,24 @@ void
 cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff);
 
 void
-cmd_tree_display_all_complete_commands(param_t *root, unsigned int index);
+cmd_tree_display_all_complete_commands(
+                                                    param_t *root, 
+                                                    unsigned int index,
+                                                    bool is_nested_mode);
+
+void 
+cmd_tree_install_universal_params (param_t *param, param_t *branch_hook);
+
+void 
+cmd_tree_uninstall_universal_params (param_t *param);
+
+bool 
+param_is_hook (param_t *param);
+
+bool 
+cmd_tree_is_token_a_hook (char *token) ;
+
+param_t*
+cmd_tree_find_matching_param (param_t **options, const char *cmd_name);
 
 #endif 

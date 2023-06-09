@@ -19,6 +19,8 @@ static param_t config;
 static param_t clearp;
 static param_t run;
 
+static param_t *universal_params[] = {&show, &config};
+
 void
 init_param(param_t *param,    
            param_type_t param_type,    
@@ -82,6 +84,7 @@ init_param(param_t *param,
     }
 
     param->CMDCODE = -1;
+    init_glthread (&param->glue);
 }
 
 
@@ -250,17 +253,20 @@ cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff) {
 
 static unsigned char temp[ LEAF_ID_SIZE + 2];
 void
-cmd_tree_display_all_complete_commands(param_t *root, unsigned int index) {
+cmd_tree_display_all_complete_commands(
+                param_t *root, unsigned int index, bool is_nested_mode) {
 
-        if(!root)
+        if (!root)
             return;
 
-        if(IS_PARAM_CMD(root)){
+        if (0 && param_is_hook (root) && is_nested_mode) return;
+
+        if (IS_PARAM_CMD(root)){
             untokenize(index);
             tokenize(GET_CMD_NAME(root), GET_PARAM_CMD(root)->len, index);
         }
 
-        else if(IS_PARAM_LEAF(root)){
+        else if (IS_PARAM_LEAF(root)){
             untokenize(index);
             memset(temp, 0, sizeof(temp));
             sprintf((char *)temp, "<%s>", GET_LEAF_ID(root));
@@ -269,11 +275,150 @@ cmd_tree_display_all_complete_commands(param_t *root, unsigned int index) {
 
         unsigned int i = CHILDREN_START_INDEX;
 
-        for( ; i <= CHILDREN_END_INDEX; i++)
-            cmd_tree_display_all_complete_commands(root->options[i], index+1);
+        for ( ; i <= CHILDREN_END_INDEX; i++)
+            cmd_tree_display_all_complete_commands(
+                    root->options[i], index+1, is_nested_mode);
     
-        if(root->callback){
+        if (root->callback){
             print_tokens(index + 1); 
             printw("\n");
         }   
+}
+
+void 
+cmd_tree_install_universal_params (param_t *param, param_t *branch_hook) {
+
+    int i = 0, j = 0;
+    int k = sizeof (universal_params) / sizeof(universal_params[0]);
+    
+    while (true) {
+
+        if (i > CHILDREN_END_INDEX) return;
+
+        if (param->options[i]) {
+            i++;
+            continue;
+        }
+
+        if (universal_params[j] == branch_hook) j++;
+        if (j == k) return;
+        param->options[i++] = universal_params[j++]; 
+        if (j == k) return;
+    }
+}
+
+void 
+cmd_tree_uninstall_universal_params (param_t *param) {
+
+    int i, j;
+    int k = sizeof (universal_params) / sizeof(universal_params[0]);
+
+    for (i = CHILDREN_START_INDEX; i <= CHILDREN_END_INDEX; i++) {
+        if (!param->options[i]) continue;
+        for ( j = 0; j < k; j++) {
+            if (param->options[i] == universal_params[j]) {
+                param->options[i] = NULL;
+                break;
+            }
+        }
+    }
+}
+
+bool 
+param_is_hook (param_t *param) {
+
+if (    param == libcli_get_config_hook () ||
+         param == libcli_get_clear_hook () ||
+         param == libcli_get_show_hook () ||
+         param == libcli_get_run_hook () ||
+         param == libcli_get_debug_hook () ) {
+    
+    return true;
+}
+
+    return false;
+}
+
+bool 
+cmd_tree_is_token_a_hook (char *token) {
+
+    param_t *root = libcli_get_root_hook ();
+
+    return (cmd_tree_find_matching_param (&root->options[0], token) != NULL); 
+
+}
+
+static param_t*
+array_of_possibilities[POSSIBILITY_ARRAY_SIZE];
+
+static inline int
+is_cmd_string_match(param_t *param, const char *str, bool *ex_match){
+    
+    *ex_match = false;
+    int str_len = strlen(str);
+    int str_len_param = param->cmd_type.cmd->len;
+
+    int rc =  (strncmp(param->cmd_type.cmd->cmd_name, 
+                   str, str_len));
+
+    if ( !rc && (str_len == str_len_param )) {
+        *ex_match = true;
+    }
+    return rc;
+}
+
+param_t*
+cmd_tree_find_matching_param (param_t **options, const char *cmd_name){
+    
+    int i = 0,
+         j = 0,
+        choice = -1,
+        leaf_index = -1;
+         
+    bool ex_match = false;
+    
+    memset(array_of_possibilities, 0, POSSIBILITY_ARRAY_SIZE * sizeof(param_t *));
+
+    for (; options[i] && i <= CHILDREN_END_INDEX; i++) {
+
+        if (IS_PARAM_LEAF(options[i])) {
+            leaf_index = i;
+            continue;
+        }
+
+        if (is_cmd_string_match(options[i], cmd_name, &ex_match) == 0) {
+
+            if (ex_match) {
+                 array_of_possibilities[ 0 ] = options[i];
+                 j = 1;
+                break;
+            }
+            array_of_possibilities[ j++ ] = options[i];
+            assert (j < POSSIBILITY_ARRAY_SIZE);
+            continue;
+        }
+    }
+
+    if(leaf_index >= 0 && j == 0)
+        return options[leaf_index];
+
+    if( j == 0)
+        return NULL;
+
+    if(j == 1)
+        return array_of_possibilities[0];
+
+    /* More than one param matched*/
+    printw("%d possibilities :\n", j);
+    for(i = 0; i < j; i++)
+        printw("%-2d. %s\n", i, GET_CMD_NAME(array_of_possibilities[i]));
+
+    printw("Choice [0-%d] : ? ", j-1);
+    scanw("%d", &choice);
+    
+    if(choice < 0 || choice > (j-1)){
+        printw("\nInvalid Choice");
+        return NULL;
+    }
+    return array_of_possibilities[choice];   
 }
