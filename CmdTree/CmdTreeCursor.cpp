@@ -873,8 +873,6 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     
     int byte_count = 0;
 
-    if (!cli_is_char_mode_on ()) return;
-
     init_glthread (&temp_list);
 
     cli = cli_get_default_cli();
@@ -882,7 +880,7 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     if (cmdtc->root == cmdtc->curr_param) return;
     if (!cli_cursor_is_at_end_of_line (cli)) return;
     if (cli_cursor_is_at_begin_of_line (cli)) return;
-    if (cmdtc_am_i_working_in_nested_mode(cmdtc)) return;
+    if (!cli_is_char_mode_on()) return;
 
     /* Allow Mode when we are either in init state Or 
         in multiple match state but with i_cursor index as 0 which
@@ -894,6 +892,48 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
 
     /* No point in going into Mode if we are at bottom of the cmd tree*/
     if (cmdtc_is_cursor_at_bottom_mode_node (cmdtc)) return;
+
+    /* Handle the case when user wants to enter mode again while he is
+        working in nested mode. Reform the stack/TLV buffer by eliminating all params
+        which belong to outer command*/
+    if (cmdtc_am_i_working_in_nested_mode(cmdtc)) {
+
+        /* Remove all the params from the stack which belongs to outer command
+        i.e. (stack[0] (root),  stack[stack->checkpoint] ] ). Mark the top of the stack
+        as new checkpoint. Note : '( ' means excluding, ']' means including*/
+        while (cmdtc->stack->top > cmdtc->stack_checkpoint) {
+
+                param = (param_t *)pop(cmdtc->stack);
+                assert(!IS_QUEUED_UP_IN_THREAD(&param->glue));
+                glthread_add_next(&temp_list, &param->glue);
+        }
+
+        /* Remove the universal tags from outer command's checkpointed param*/
+        cmd_tree_uninstall_universal_params ((param_t *)StackGetTopElem(cmdtc->stack));
+
+        while (!cmdtc_is_stack_empty (cmdtc->stack)) {
+            pop(cmdtc->stack);
+        }
+
+        /* Lets obey our design and rebuild the serialize buffer so that tlv buffer comply with
+            the stack*/
+        reset_serialize_buffer (cmdtc->tlv_buffer);
+
+        while ((curr = dequeue_glthread_first(&temp_list))) {
+
+            param = glue_to_param(curr);
+            push(cmdtc->stack, (void *)param);
+            cmd_tree_collect_param_tlv (param, cmdtc->tlv_buffer);
+        }
+        
+        cmdtc->stack_checkpoint = cmdtc->stack->top;
+        serialize_buffer_mark_checkpoint (cmdtc->tlv_buffer);
+        cmdtc->root = libcli_get_root_hook ();
+        cmdtc->curr_param = (param_t *)StackGetTopElem(cmdtc->stack);
+    }
+
+
+    /* Algorithm to enter mode starts here */
 
     /* Drain the complete stack temporarily, we will rebuilt it as it is*/
     while (!cmdtc_is_stack_empty (cmdtc->stack)) {
@@ -934,11 +974,15 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
 
     cli_set_hdr (cli, NULL, byte_count);
 
+    /*Since we are about to rebuild the stack, rebuild the serialize buffer as
+        stack and tlv buffer go hand-in-hand. Hence, drained the older tlv buffer*/
+    reset_serialize_buffer (cmdtc->tlv_buffer);
     /* Rebuild  the stack again, thanks you stack !*/
     while ((curr = dequeue_glthread_first (&temp_list))) {
 
          param = glue_to_param (curr);
          push (cmdtc->stack , (void *)param);
+         cmd_tree_collect_param_tlv (param, cmdtc->tlv_buffer);
     }
 
     if (cmdtc->root != libcli_get_root_hook()) {
@@ -1004,7 +1048,8 @@ cmdtc_display_all_complete_commands (cmd_tree_cursor_t *cmdtc) {
     return (cmdtc->stack_checkpoint > 0);
  }
 
-/* Nested mode is defined as the user typing out the cli starting from hook while he is already in mode. Note that, char mode should be on !
+/* Nested mode is defined as the user typing out the cli starting from hook 
+while he is already in mode. Note that, char mode should be on !
 Ex : Soft-Firewall>$ config-mtrace-source> show ip igmp configuration
 */
   bool 
