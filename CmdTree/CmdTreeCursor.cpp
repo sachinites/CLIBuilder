@@ -162,9 +162,6 @@ cmdtc_reset_cursor (cmd_tree_cursor_t *cmdtc) {
 void 
 cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
 
-    if (cmdtc_am_i_working_in_mode (cmdtc)) {
-        cmd_tree_uninstall_universal_params (cmdtc->root);
-    }
     reset_stack (cmdtc->stack);
     push (cmdtc->stack, (void *)libcli_get_root_hook());
     cmdtc->stack_checkpoint = cmdtc->stack->top;
@@ -824,7 +821,14 @@ cmdtc_is_cursor_at_bottom_mode_node (cmd_tree_cursor_t *cmdtc) {
 
 Stack_t *
 cmdtc_get_stack (cmd_tree_cursor_t *cmdtc) {
+    
     return cmdtc->stack;
+}
+
+param_t *
+cmdtc_get_root (cmd_tree_cursor_t *cmdtc) {
+
+    return cmdtc->root;
 }
 
 /* Cmd Tree Cursor based functions */
