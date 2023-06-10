@@ -254,12 +254,12 @@ cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff) {
 static unsigned char temp[ LEAF_ID_SIZE + 2];
 void
 cmd_tree_display_all_complete_commands(
-                param_t *root, unsigned int index, bool is_nested_mode) {
+                param_t *root, unsigned int index) {
 
         if (!root)
             return;
 
-        if (0 && param_is_hook (root) && is_nested_mode) return;
+        if (root->flags & PARAM_F_NO_EXPAND) return;
 
         if (IS_PARAM_CMD(root)){
             untokenize(index);
@@ -277,7 +277,7 @@ cmd_tree_display_all_complete_commands(
 
         for ( ; i <= CHILDREN_END_INDEX; i++)
             cmd_tree_display_all_complete_commands(
-                    root->options[i], index+1, is_nested_mode);
+                    root->options[i], index+1);
     
         if (root->callback){
             print_tokens(index + 1); 
@@ -303,6 +303,7 @@ cmd_tree_install_universal_params (param_t *param, param_t *branch_hook) {
         if (universal_params[j] == branch_hook) j++;
         if (j == k) return;
         param->options[i++] = universal_params[j++]; 
+        param->options[i - 1]->flags |= PARAM_F_NO_EXPAND; 
         if (j == k) return;
     }
 }
@@ -317,6 +318,7 @@ cmd_tree_uninstall_universal_params (param_t *param) {
         if (!param->options[i]) continue;
         for ( j = 0; j < k; j++) {
             if (param->options[i] == universal_params[j]) {
+                universal_params[j]->flags &= ~PARAM_F_NO_EXPAND;
                 param->options[i] = NULL;
                 break;
             }

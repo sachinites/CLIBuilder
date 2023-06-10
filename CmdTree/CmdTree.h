@@ -41,6 +41,7 @@ struct _param_t_{
     struct _param_t_ *options[MAX_OPTION_SIZE];
     display_possible_values_callback disp_callback;
     int CMDCODE;
+    uint8_t flags;
     glthread_t glue;
 };
 GLTHREAD_TO_STRUCT (glue_to_param, param_t, glue);
@@ -56,6 +57,8 @@ GLTHREAD_TO_STRUCT (glue_to_param, param_t, glue);
 #define GET_CMD_NAME(param)         (GET_PARAM_CMD(param)->cmd_name)
 #define GET_PARAM_HELP_STRING(param) (param->help)
 #define GET_LEAF_ID(param)          (GET_PARAM_LEAF(param)->leaf_id)
+
+#define PARAM_F_NO_EXPAND   1
 
 void 
 cmd_tree_init ();
@@ -89,8 +92,7 @@ cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff);
 void
 cmd_tree_display_all_complete_commands(
                                                     param_t *root, 
-                                                    unsigned int index,
-                                                    bool is_nested_mode);
+                                                    unsigned int index);
 
 void 
 cmd_tree_install_universal_params (param_t *param, param_t *branch_hook);

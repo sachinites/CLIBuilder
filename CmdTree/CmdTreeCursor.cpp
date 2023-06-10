@@ -470,20 +470,22 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
     int row, col1, col2;
     getyx(stdscr, row, col1);
 
+    attron (COLOR_PAIR(GREEN_ON_BLACK));
+
+    if (cmdtc->curr_param->callback) {
+        printw ("\n<cr>");
+    }
+
     if (IS_GLTHREAD_LIST_EMPTY (&cmdtc->matching_params_list) &&
             !cmdtc->leaf_param) {
         /* Nothing to display */
-        return;
+        goto done;
     }
-
-    cli_screen_cursor_move_next_line ();
-
-    attron (COLOR_PAIR(GREEN_ON_BLACK));
 
     ITERATE_GLTHREAD_BEGIN (&cmdtc->matching_params_list, curr) {
 
         param = glue_to_param (curr);
-        printw ("nxt cmd  -> %-31s   |   %s\n", 
+        printw ("\nnxt cmd  -> %-31s   |   %s", 
             GET_CMD_NAME(param), 
             GET_PARAM_HELP_STRING(param));
 
@@ -491,13 +493,14 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
 
     if (cmdtc->leaf_param) {
         
-        printw ("nxt cmd  -> %-32s   |   %s\n", 
+        printw ("\nnxt cmd  -> %-32s   |   %s", 
             GET_LEAF_TYPE_STR(cmdtc->leaf_param), 
             GET_PARAM_HELP_STRING(cmdtc->leaf_param));        
     }
 
+    done:
     attroff (COLOR_PAIR(GREEN_ON_BLACK));
-    cli_printsc (cli_get_default_cli(), false);
+    cli_printsc (cli_get_default_cli(), true);
     getyx(stdscr, row, col2);
     move (row, col1);
 }
@@ -1038,8 +1041,7 @@ void
 cmdtc_display_all_complete_commands (cmd_tree_cursor_t *cmdtc) {
 
         cmd_tree_display_all_complete_commands (
-                cmdtc->curr_param, 0, 
-                 cmdtc_am_i_working_in_nested_mode (cmdtc));
+                cmdtc->curr_param, 0 );
  }
 
  bool 
@@ -1063,9 +1065,14 @@ Ex : Soft-Firewall>$ config-mtrace-source> show ip igmp configuration
 
 param_t *
 cmdtc_get_branch_hook (cmd_tree_cursor_t *cmdtc) {
-
+   
     if (cmdtc_is_stack_empty (cmdtc->stack)) return NULL;
-    return (param_t *)(cmdtc->stack->slot[1]);
+    
+    if (!cmdtc_am_i_working_in_nested_mode (cmdtc)) {    
+        return  (param_t *)(cmdtc->stack->slot[1]);
+    }
+
+    return (param_t *)cmdtc->stack->slot[cmdtc->stack_checkpoint + 1];
 }
 
 /* CLI Trigger Code */
@@ -1276,7 +1283,8 @@ cmdtc_parse_full_command (cli_t *cli) {
         is_new_cmdtc = true;
     }
     
-    /*Case 2 :  If in mode (line mode also), user has typed out the command starting from hook ( first token is a hook), then also take a new cmdtc because we dont need existing stack and TLV buffer*/
+    /*Case 2 :  If in mode (line mode also), user has typed out the command starting from hook 
+    ( first token is a hook), then also take a new cmdtc because we dont need existing stack and TLV buffer*/
     else if (cmd_tree_is_token_a_hook (*(tokens+ 0))) {
         cmd_tree_cursor_init (&cmdtc);
         is_new_cmdtc = true;
