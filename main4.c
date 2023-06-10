@@ -22,7 +22,7 @@ node_callback_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_dis
 int
 main(int argc, char **argv){
 
-    cli_key_processor_init ();
+    libcli_init ();
 
     param_t *show   = libcli_get_show_hook();
     param_t *debug  = libcli_get_debug_hook();
@@ -61,7 +61,7 @@ main(int argc, char **argv){
             /*The below API should be called for param upto which the command is supposed to invoke application callback rouine. 
              * The CMDODE_SHOW_NODE code is sent to application using which we find which command was triggered, and accordingly what 
              * are expected leaf params we need to parse. More on this ater.*/
-            set_param_cmd_code (&node_name, 1);
+            libcli_set_param_cmd_code (&node_name, 1);
             /*Implementing CMD2*/
 
             {
@@ -94,7 +94,7 @@ main(int argc, char **argv){
                     /* The below API should be called for param at which the command is supposed to invoke application callback rouine. 
                      * This CMDODE_SHOW_NODE_LOOPBACK code is sent to application using which we find which command was triggered, and accordingly what 
                      * are expected leaf params we need to parse. More on this ater.*/
-                    set_param_cmd_code (&loopback_address, 2);
+                    libcli_set_param_cmd_code (&loopback_address, 2);
                 }
             }
            
@@ -137,7 +137,7 @@ main(int argc, char **argv){
                     /* The below API should be called for param at which the command is supposed to invoke application callback rouine. 
                      * This CMDODE_SHOW_NODE_LOOPBACK code is sent to application using which we find which command was triggered, and accordingly what 
                      * are expected leaf params we need to parse. More on this ater.*/
-                    set_param_cmd_code (&loopback_address, 2);
+                    libcli_set_param_cmd_code (&loopback_address, 2);
                 }
             }
 
@@ -208,7 +208,7 @@ main(int argc, char **argv){
                     /* The below API should be called for param at which the command is supposed to invoke application callback rouine. 
                      * This CMDODE_SHOW_NODE_LOOPBACK code is sent to application using which we find which command was triggered, and accordingly what 
                      * are expected leaf params we need to parse. More on this ater.*/
-                    set_param_cmd_code (&loopback_address, 3);
+                    libcli_set_param_cmd_code (&loopback_address, 3);
                 }
             }
         }

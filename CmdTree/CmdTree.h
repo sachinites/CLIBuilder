@@ -83,6 +83,9 @@ libcli_get_clear_hook(void);
 param_t *
 libcli_get_run_hook(void);
 
+param_t *
+libcli_get_no_hook(void);
+
 bool
 cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char, int index);
 

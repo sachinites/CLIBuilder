@@ -141,7 +141,7 @@ static cli_t *cli_clone (cli_t *cli) {
     while (top != topx) {
         param = (param_t *)stack->slot[top];
         rc += sprintf ((char *)new_cli->clibuff + rc , "%s ", 
-            IS_PARAM_CMD(param) ? GET_CMD_NAME(param) :
+            (IS_PARAM_CMD(param) || IS_PARAM_NO_CMD(param)) ? GET_CMD_NAME(param) :
             GET_LEAF_VALUE_PTR(param));
         top++;
     }
@@ -199,7 +199,7 @@ cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
 }
 
 void
-cli_key_processor_init () {
+libcli_init () {
 
     default_cli = (cli_t *)calloc (1, sizeof(cli_t));
     cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, (uint8_t) strlen (DEF_CLI_HDR));
@@ -802,6 +802,9 @@ cli_process_key_interrupt(int ch)
         break;
     }
 }
+
+void 
+cli_start_shell ();
 
 void 
 cli_start_shell () {

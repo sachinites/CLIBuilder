@@ -46,6 +46,8 @@ typedef struct cmd_tree_cursor_ {
     param_t *leaf_param;
     /* This is boolean which indiscate that cmd is successfully submitted to appln or not */
     bool success;
+    /* This boolean keeps a track whether it is a negative config command*/
+    bool is_negate;
 } cmd_tree_cursor_t;
 
 /* This cursor will be used to prse the CLIs when Operating in Char-by-char Mode*/
@@ -66,6 +68,7 @@ cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc) {
     (*cmdtc)->matching_params_list = {0, 0};
     (*cmdtc)->leaf_param = NULL;
     (*cmdtc)->success = false;
+    (*cmdtc)->is_negate = false;
 }
 
 void 
@@ -131,18 +134,19 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc) {
                         (param_t *)cmdtc->stack->slot[cmdtc->stack_checkpoint] : NULL;
 
     printw ("\nroot = %s, curr_param = %s, stack top = %s, "
-                    "chkp = %s, top_index = %d, tlv_top = %s, state = %s", 
-            IS_PARAM_CMD(cmdtc->root) ? 
+                    "chkp = %s, top_index = %d, tlv_top = %s, state = %s, negation = %s", 
+            (IS_PARAM_CMD(cmdtc->root) || IS_PARAM_NO_CMD(cmdtc->root)) ? 
                 GET_CMD_NAME(cmdtc->root) : GET_LEAF_ID (cmdtc->root),
-            IS_PARAM_CMD(cmdtc->curr_param) ? 
+            (IS_PARAM_CMD(cmdtc->root) || IS_PARAM_NO_CMD(cmdtc->root)) ? 
                 GET_CMD_NAME(cmdtc->curr_param) : GET_LEAF_ID (cmdtc->curr_param),
-            param_top ? (IS_PARAM_CMD(param_top) ? 
+            param_top ? ( (IS_PARAM_CMD(param_top) || IS_PARAM_NO_CMD(param_top)) ? 
                 GET_CMD_NAME(param_top) : GET_LEAF_ID (param_top)) : NULL,            
-           param_chkp ? (IS_PARAM_CMD(param_chkp) ? 
+           param_chkp ? ((IS_PARAM_CMD(param_chkp) || IS_PARAM_NO_CMD(param_chkp)) ? 
                 GET_CMD_NAME(param_chkp) : GET_LEAF_ID (param_chkp)) : NULL,
             cmdtc->stack->top,
             tlv_top_name,
-            cmdtc_get_state_str (cmdtc));
+            cmdtc_get_state_str (cmdtc),
+            cmdtc->is_negate ? "y" : "n");
 }
 
 bool
@@ -173,6 +177,7 @@ cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
     while ((dequeue_glthread_first (&cmdtc->matching_params_list)));
     cmdtc->leaf_param = NULL;
     cmdtc->success = false;
+    cmdtc->is_negate = false;
 }
 
 bool 
@@ -193,6 +198,9 @@ cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
     cmdtc->cmdtc_state = cmdt_cur_state_init;
     while (dequeue_glthread_first(&cmdtc->matching_params_list));
     cmdtc->leaf_param = NULL;
+    if (IS_PARAM_NO_CMD (cmdtc->curr_param)) {
+        cmdtc->is_negate = true;
+    }
 }
 
 bool 
@@ -234,10 +242,15 @@ cmd_tree_cursor_move_one_level_up (
                 cmdtc->stack_checkpoint--;
             }
             pop(cmdtc->stack);
-            count = IS_PARAM_CMD (cmdtc->curr_param) ? \
+            count = (IS_PARAM_CMD (cmdtc->curr_param) || IS_PARAM_NO_CMD(cmdtc->curr_param)) ? \
                             cmdtc->curr_param->cmd_type.cmd->len : \
                             strlen(GET_LEAF_VALUE_PTR(cmdtc->curr_param));
             count += 1; /* +1 is to accomo*/
+
+            if (IS_PARAM_NO_CMD (cmdtc->curr_param)) {
+                cmdtc->is_negate = false;
+            }
+
             cmdtc->curr_param =  (param_t *)StackGetTopElem(cmdtc->stack);
             
             /* This fn is called for PAGE_UP and BACKSPACE. We need to update root
@@ -409,6 +422,8 @@ cmdtc_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, bo
 
             child_param = cmdtc->curr_param->options[i];
             if (!child_param) continue;
+            if (IS_PARAM_NO_CMD(child_param) &&
+                    cmdtc->is_negate) continue;
 
             if (IS_PARAM_LEAF (child_param)) {
                 assert(!cmdtc->leaf_param);
@@ -435,7 +450,7 @@ cmdtc_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, bo
     ITERATE_GLTHREAD_BEGIN (&cmdtc->matching_params_list, curr) {
 
         child_param = glue_to_param(curr);
-        assert (IS_PARAM_CMD (child_param));
+        assert (IS_PARAM_CMD (child_param) || IS_PARAM_NO_CMD(child_param));
         if ((GET_CMD_NAME(child_param))[cmdtc->icursor] != c) {
             count--;
             remove_glthread (&child_param->glue);
@@ -485,6 +500,9 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
     ITERATE_GLTHREAD_BEGIN (&cmdtc->matching_params_list, curr) {
 
         param = glue_to_param (curr);
+        if (IS_PARAM_NO_CMD (param) &&
+                cmdtc->is_negate) continue;
+
         printw ("\nnxt cmd  -> %-31s   |   %s", 
             GET_CMD_NAME(param), 
             GET_PARAM_HELP_STRING(param));
@@ -957,7 +975,7 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
 
         param = glue_to_param (curr);
 
-        if (IS_PARAM_CMD (param)) {
+        if (IS_PARAM_CMD (param) || IS_PARAM_NO_CMD(param)) {
 
             byte_count += snprintf ((char *)buffer + byte_count, 
                             MAX_COMMAND_LENGTH - byte_count, "%s-", GET_CMD_NAME(param));
@@ -1018,6 +1036,11 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
 
         if (IS_PARAM_LEAF(param)) {
             memset (GET_LEAF_VALUE_PTR(param), 0, LEAF_VALUE_HOLDER_SIZE);
+        }
+
+        if (IS_PARAM_NO_CMD(param)) {
+            assert (cmdtc->is_negate);
+            cmdtc->is_negate = false;
         }
     }
 
@@ -1132,15 +1155,20 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
     int tlv_buffer_checkpoint_offset = serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer);
 
     if (cmdtc_get_branch_hook (cmdtc) == libcli_get_config_hook()) {
-        /* ToDo : Support Command Negation !*/
+       
         enable_or_diable = CONFIG_ENABLE;
+        if (cmdtc->is_negate) {
+            enable_or_diable = CONFIG_DISABLE;
+        }
     }
     else {
         enable_or_diable = OPERATIONAL;
     }
 
-    /* Handle Trigger of Operational Cmd*/
-    if (enable_or_diable == OPERATIONAL) {
+    /* Handle Trigger of Operational Or Config-Negate Cmds. Both Commands
+        types are triggered in same way - just once*/
+    if (enable_or_diable == OPERATIONAL ||
+            enable_or_diable == CONFIG_DISABLE) {
 
         param = (param_t *)StackGetTopElem(cmdtc->stack);
 
@@ -1366,11 +1394,23 @@ cmdtc_parse_full_command (cli_t *cli) {
             put_value_in_tlv((&tlv), *(tokens +i));
             strncpy (GET_LEAF_VALUE_PTR (param), *(tokens +i), strlen (*(tokens +i)));
             collect_tlv(cmdtc->tlv_buffer, &tlv);
+            push(cmdtc->stack, (void *)param);
         }
-        else {
+        else if (IS_PARAM_CMD(param)){
             cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
+            push(cmdtc->stack, (void *)param);
         }
-        push(cmdtc->stack, (void *)param);
+        else if (IS_PARAM_NO_CMD (param)) {
+            if (!cmdtc->is_negate) {
+                cmdtc->is_negate = true;
+                cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
+                push(cmdtc->stack, (void *)param);
+            }
+            else {
+                /* Negation appearing more than once in the command, ignore the subsequent
+                    occurences (dont push it into stack or TLV)*/
+            }
+        }
     }
 
     /* Set the last param which holds the callback*/

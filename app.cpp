@@ -5,7 +5,7 @@
 int 
 main (int argc, char **argv) {
 
-    cli_key_processor_init ();
+    libcli_init ();
     cli_start_shell();
     return 0;
 }

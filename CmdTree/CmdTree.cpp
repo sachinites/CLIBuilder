@@ -35,7 +35,10 @@ void
 libcli_register_param(param_t *parent, param_t *child);
 
 void 
-set_param_cmd_code(param_t *param, int cmd_code) ;
+libcli_set_param_cmd_code(param_t *param, int cmd_code) ;
+
+void
+libcli_support_cmd_negation (param_t *param);
 
 void
 init_param(param_t *param,    
@@ -69,8 +72,9 @@ init_param(param_t *param,
     {   
         GET_PARAM_CMD(param) = (cmd_t *)calloc(1, sizeof(cmd_t));
         param->param_type = NO_CMD;
-        memcpy(GET_CMD_NAME(param), NEGATE_CHARACTER, strlen(NEGATE_CHARACTER));
+        strncpy((char *)GET_CMD_NAME(param), NEGATE_CHARACTER, strlen(NEGATE_CHARACTER));
         GET_CMD_NAME(param)[CMD_NAME_SIZE - 1] = '\0';
+        GET_PARAM_CMD(param)->len = strlen (GET_CMD_NAME(param));
     }
 
     param->callback = callback;
@@ -105,7 +109,7 @@ libcli_register_param(param_t *parent, param_t *child) {
 }
 
 void 
-set_param_cmd_code(param_t *param, int cmd_code) {
+libcli_set_param_cmd_code(param_t *param, int cmd_code) {
 
     if (param->callback == NULL)
         assert(0);
@@ -125,7 +129,7 @@ static void
     chook = libcli_get_config_hook();
     init_param(chook, CMD, "config", NULL, 0, INVALID, 0, "config cmds");
     libcli_register_param (root_hook, chook);
-
+   
     chook = libcli_get_debug_hook();
     init_param(chook, CMD, "debug", 0, 0, INVALID, 0, "debug cmds");
     libcli_register_param (root_hook, chook);
@@ -151,7 +155,7 @@ static void
             static param_t name;
             init_param(&name, LEAF, NULL, clistd_config_device_default_handler, NULL, STRING, "host-name", "Host Name");
             libcli_register_param(&hostname, &name);
-            set_param_cmd_code(&name, CONFIG_DEVICE_HOSTNAME);
+            libcli_set_param_cmd_code(&name, CONFIG_DEVICE_HOSTNAME);
         }
     }
 
@@ -162,14 +166,14 @@ static void
         static param_t help;
         init_param (&help, CMD, "help", show_help_handler, NULL, INVALID, NULL, "KYC (Know Your CLI)");
         libcli_register_param(hook, &help);
-        set_param_cmd_code(&help, SHOW_CLI_HELP);
+        libcli_set_param_cmd_code(&help, SHOW_CLI_HELP);
     }
     {
         /*show history*/
         static param_t history;
         init_param (&history, CMD, "history", show_history_handler, NULL, INVALID, NULL, "CLI history");
         libcli_register_param(hook, &history);
-        set_param_cmd_code(&history, SHOW_CLI_HISTORY);        
+        libcli_set_param_cmd_code(&history, SHOW_CLI_HISTORY);        
     }
  }
 
@@ -181,6 +185,12 @@ cmd_tree_init () {
     cmd_tree_init_cursors () ;
 }
 
+void 
+libcli_init_done () {
+
+    param_t *param = libcli_get_config_hook();
+    libcli_support_cmd_negation (param);
+}
 /* Function to be used to get access to above hooks*/
 
 param_t *
@@ -243,6 +253,13 @@ cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff) {
         put_value_in_tlv((&tlv), GET_CMD_NAME(param));
         collect_tlv(ser_buff, &tlv);
     }
+    else if (IS_PARAM_NO_CMD (param)) {
+        
+        tlv.tlv_type = TLV_TYPE_NEGATE;
+        tlv.leaf_type = STRING;
+        put_value_in_tlv((&tlv), GET_CMD_NAME(param));
+        collect_tlv(ser_buff, &tlv);
+    }
     else {
 
         prepare_tlv_from_leaf(GET_PARAM_LEAF(param), (&tlv));
@@ -260,7 +277,8 @@ cmd_tree_display_all_complete_commands(
             return;
 
         if (root->flags & PARAM_F_NO_EXPAND) return;
-
+        if (IS_PARAM_NO_CMD(root)) return;
+        
         if (IS_PARAM_CMD(root)){
             untokenize(index);
             tokenize(GET_CMD_NAME(root), GET_PARAM_CMD(root)->len, index);
@@ -329,16 +347,12 @@ cmd_tree_uninstall_universal_params (param_t *param) {
 bool 
 param_is_hook (param_t *param) {
 
-if (    param == libcli_get_config_hook () ||
+    return (    param == libcli_get_config_hook () ||
          param == libcli_get_clear_hook () ||
          param == libcli_get_show_hook () ||
          param == libcli_get_run_hook () ||
-         param == libcli_get_debug_hook () ) {
-    
-    return true;
-}
+         param == libcli_get_debug_hook () );
 
-    return false;
 }
 
 bool 
@@ -421,4 +435,36 @@ cmd_tree_find_matching_param (param_t **options, const char *cmd_name){
         return NULL;
     }
     return array_of_possibilities[choice];   
+}
+
+void 
+libcli_support_cmd_negation (param_t *param) {   
+
+    int i = 0;
+    assert(param);
+
+    param_t *negate_param = cmd_tree_find_matching_param(
+                            &param->options[0], NEGATE_CHARACTER);
+
+    if (negate_param && IS_PARAM_NO_CMD(negate_param)) {
+
+        printw ("Error : Attempt to add Duplicate Negate param in cmd : %s\n",
+                        GET_CMD_NAME(param));
+        assert(0);
+    }
+
+    negate_param = (param_t *)calloc (1, sizeof (param_t));
+    init_param (negate_param , NO_CMD, "no", NULL, NULL, INVALID, NULL, "Cmd Negation");
+
+    for (i = CHILDREN_START_INDEX; i <= CHILDREN_END_INDEX; i++) {
+
+        if (param->options[i]) {
+            negate_param->options[i] = param->options[i];
+            continue;
+        }
+        break;
+    }
+
+    assert(i <= CHILDREN_END_INDEX);
+    param->options[i] = negate_param;
 }
