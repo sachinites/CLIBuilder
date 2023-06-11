@@ -261,7 +261,8 @@ cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff) {
         collect_tlv(ser_buff, &tlv);
     }
     else {
-
+        
+        tlv.tlv_type = TLV_TYPE_NORMAL;
         prepare_tlv_from_leaf(GET_PARAM_LEAF(param), (&tlv));
         put_value_in_tlv((&tlv), GET_LEAF_VALUE_PTR(param));
         collect_tlv(ser_buff, &tlv);

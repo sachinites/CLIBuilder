@@ -251,7 +251,7 @@ unsigned char *
 cli_get_cli_buffer (cli_t *cli, int *size) {
 
     if (size) {
-        *size = (cli->end_pos - cli->start_pos);
+        *size = (cli->end_pos);
     }
     return cli->clibuff;
 }

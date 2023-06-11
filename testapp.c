@@ -15,7 +15,7 @@
  *
  * =====================================================================================
  */
-#include <ncurses.h>
+
 #include <stdlib.h>
 #include "libcli.h"
 
@@ -31,13 +31,14 @@ list_vlans(param_t *param, ser_buff_t *tlv_buf){
     unsigned int i = 1;
     for(; i <= 10; i++){
 
-        printf("\n%d", i);
+        printf ("\n%d", i);
     }
 }
 
 int
 show_ip_igmp_groups_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_disable){
 
+    printf ("\nenable or disable = %d", enable_or_disable);
     dump_tlv_serialized_buffer(tlv_buf);
     
 #if 0
@@ -56,6 +57,7 @@ show_ip_igmp_groups_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_
 int
 mtrace_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_disable){
 
+    printf ("\nenable or disable = %d", enable_or_disable);
     dump_tlv_serialized_buffer(tlv_buf);
     return 0;
 }

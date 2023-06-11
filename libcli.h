@@ -3,9 +3,13 @@
 
 #define printf printw
 
+#include <ncurses.h>
 #include "KeyProcessor/KeyProcessor.h"
 #include "CmdTree/CmdTree.h"
 #include "cmdtlv.h"
+
+void
+libcli_init ();
 
 /*See the definition of this fn to know about arguments*/
 void
@@ -26,9 +30,6 @@ libcli_set_param_cmd_code (param_t *param, int cmd_code) ;
 
 void
 libcli_support_cmd_negation (param_t *param);
-
-void
-libcli_init ();
 
 void 
 libcli_init_done ();
