@@ -1,8 +1,6 @@
 #ifndef __LIBCLI__
 #define __LIBCLI__
 
-#define printf printw
-
 #include <ncurses.h>
 #include "KeyProcessor/KeyProcessor.h"
 #include "CmdTree/CmdTree.h"
