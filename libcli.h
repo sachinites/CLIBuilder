@@ -6,6 +6,8 @@
 #include "CmdTree/CmdTree.h"
 #include "cmdtlv.h"
 
+#define printf printw 
+
 void
 libcli_init ();
 

@@ -177,20 +177,7 @@ static void
     }
  }
 
-void 
-cmd_tree_init () {
 
-    init_token_array();
-    libcli_build_default_cmdtree();
-    cmd_tree_init_cursors () ;
-}
-
-void 
-libcli_init_done () {
-
-    param_t *param = libcli_get_config_hook();
-    libcli_support_cmd_negation (param);
-}
 /* Function to be used to get access to above hooks*/
 
 param_t *
@@ -237,7 +224,6 @@ cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char c, int index) {
     GET_LEAF_VALUE_PTR(leaf_param)[index] = c;
     return true;
 }
-
 
 void 
 cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff) {
@@ -468,4 +454,60 @@ libcli_support_cmd_negation (param_t *param) {
 
     assert(i <= CHILDREN_END_INDEX);
     param->options[i] = negate_param;
+}
+
+/* Working with Filters */
+
+static param_t pipe;
+static param_t include_leaf;
+static param_t exclude;
+static param_t exclude_leaf;
+
+static void
+cmd_tree_construct_filter_subtree () {
+
+    init_param (&pipe, CMD, "|", NULL, NULL, INVALID, NULL, "pipe");
+    {
+        static param_t include;
+        init_param (&include,  CMD, "include", NULL, NULL, INVALID, NULL, "Include Pattern");
+        libcli_register_param (&pipe, &include);
+        {
+            init_param (&include_leaf,  LEAF, NULL, NULL, NULL, STRING, "incl-pattern", "Include Pattern");
+            libcli_register_param (&include, &include_leaf);
+            libcli_register_param (&include_leaf, &pipe);
+        }
+    }
+    {
+        static param_t exclude;
+        init_param (&exclude,  CMD, "exclude", NULL, NULL, INVALID, NULL, "Exclude Pattern");
+        libcli_register_param (&pipe, &exclude);
+        {
+            init_param (&exclude_leaf,  LEAF, NULL, NULL, NULL, STRING, "excl-pattern", "Exclude Pattern");
+            libcli_register_param (&exclude, &exclude_leaf);
+            libcli_register_param (&exclude_leaf, &pipe);
+        }
+    }    
+}
+
+
+static void 
+ libcli_augment_show_cmds () {
+
+   // libcli_register_param (&show, &pipe);
+ }
+
+ void 
+cmd_tree_init () {
+
+    init_token_array();
+    libcli_build_default_cmdtree();
+    cmd_tree_init_cursors () ;
+}
+
+void 
+libcli_init_done () {
+
+    libcli_support_cmd_negation (libcli_get_config_hook());
+    cmd_tree_construct_filter_subtree();
+    libcli_augment_show_cmds ();
 }

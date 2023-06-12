@@ -87,7 +87,7 @@ param_t *
 libcli_get_no_hook(void);
 
 bool
-cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char, int index);
+cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char c, int index);
 
 void 
 cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff);

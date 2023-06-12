@@ -446,7 +446,7 @@ cli_process_key_interrupt(int ch)
         if (cmdtc_am_i_working_in_mode(default_cli->cmdtc)) {
             cmd_tree_uninstall_universal_params(cmdtc_get_root (default_cli->cmdtc));
         }
-        cmdtc_reset_cursor (default_cli->cmdtc);
+        cmd_tree_cursor_deinit (default_cli->cmdtc);
         cli_set_hdr (default_cli, (unsigned char *)DEF_CLI_HDR, strlen (DEF_CLI_HDR));
         cli_screen_cursor_reset_current_line();
         cli_printsc (default_cli, false);

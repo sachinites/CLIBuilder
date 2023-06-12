@@ -30,6 +30,8 @@
 #include "cli_const.h"
 #include "string_util.h"
 
+#define printf printw 
+
 #pragma pack (push,1)
 typedef struct tlv_struct{
     uint8_t tlv_type;
