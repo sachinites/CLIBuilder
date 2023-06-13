@@ -136,7 +136,7 @@ static cli_t *cli_clone (cli_t *cli) {
     rc = strlen (DEF_CLI_HDR);
     cli_set_hdr (new_cli, (unsigned char *)DEF_CLI_HDR, rc);
     new_cli->cmdtc = NULL;
-    stack = cmdtc_get_stack(cli->cmdtc);
+    stack = cmdtc_get_params_stack(cli->cmdtc);
     int topx = stack->top + 1;
     while (top != topx) {
         param = (param_t *)stack->slot[top];

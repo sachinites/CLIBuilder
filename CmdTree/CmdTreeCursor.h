@@ -58,7 +58,7 @@ void
 cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) ;
 
 Stack_t *
-cmdtc_get_stack (cmd_tree_cursor_t *cmdtc);
+cmdtc_get_params_stack (cmd_tree_cursor_t *cmdtc);
 
 param_t *
 cmdtc_get_root (cmd_tree_cursor_t *cmdtc);
@@ -79,7 +79,7 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc);
  cmdtc_am_i_working_in_nested_mode (cmd_tree_cursor_t *cmdtc) ;
 
 bool 
-cmdtc_is_stack_empty (Stack_t *stack);
+cmdtc_is_params_stack_empty (Stack_t *stack);
 
 bool 
 cmdtc_is_serialized_buffer_empty (ser_buff_t *tlv_buffer);

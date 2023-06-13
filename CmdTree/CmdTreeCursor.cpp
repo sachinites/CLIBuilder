@@ -28,11 +28,11 @@ typedef struct cmd_tree_cursor_ {
         param in the CLI history.*/
     param_t *root;
     /* DS used to store the CLI conext in execution*/
-    Stack_t *stack;
-    /* When entering into Mode, this chkpnt is used to mark the stack state*/
+    Stack_t *params_stack;
+    /* When entering into Mode, this chkpnt is used to mark the params_stack state*/
     int stack_checkpoint;
     /* Buffer used to store the values of individual keywords of CLI.  This should go hand-in-hand
-        with the stack. This TLV buffer is given to the application eventually for parsing and picking 
+        with the params_stack. This TLV buffer is given to the application eventually for parsing and picking 
         up CLI values*/
     ser_buff_t *tlv_buffer;
     /* While parsing the cmd tree, this pointer points to the current param being parsed*/
@@ -58,7 +58,7 @@ void
 cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc) {
 
     *cmdtc = (cmd_tree_cursor_t *)calloc (1, sizeof (cmd_tree_cursor_t));
-    (*cmdtc)->stack = get_new_stack();
+    (*cmdtc)->params_stack = get_new_stack();
     init_serialized_buffer_of_defined_size (&((*cmdtc)->tlv_buffer), TLV_MAX_BUFFER_SIZE);
     cmd_tree_cursor_deinit ((*cmdtc));
 }
@@ -73,9 +73,14 @@ cmd_tree_init_cursors () {
 void 
 cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
 
-    reset_stack (cmdtc->stack);
-    push (cmdtc->stack, (void *)libcli_get_root_hook());
-    cmdtc->stack_checkpoint = cmdtc->stack->top;
+    param_t *param;
+
+    while ((param = (param_t *)pop(cmdtc->params_stack))) {
+        if (!IS_PARAM_LEAF(param)) continue;
+        memset (GET_LEAF_VALUE_PTR(param), 0, LEAF_VALUE_HOLDER_SIZE);
+    }
+    push (cmdtc->params_stack, (void *)libcli_get_root_hook());
+    cmdtc->stack_checkpoint = cmdtc->params_stack->top;
     reset_serialize_buffer (cmdtc->tlv_buffer);
     cmd_tree_collect_param_tlv(libcli_get_root_hook(),  cmdtc->tlv_buffer);
     serialize_buffer_mark_checkpoint(cmdtc->tlv_buffer);
@@ -92,10 +97,10 @@ cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
 void 
 cmd_tree_cursor_destroy_internals (cmd_tree_cursor_t *cmdtc) {
 
-    if (cmdtc->stack) {
-        reset_stack (cmdtc->stack);
-        free_stack (cmdtc->stack);
-        cmdtc->stack = NULL;
+    if (cmdtc->params_stack) {
+        reset_stack (cmdtc->params_stack);
+        free_stack (cmdtc->params_stack);
+        cmdtc->params_stack = NULL;
     }
 
     if (cmdtc->tlv_buffer) {
@@ -140,7 +145,7 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc) {
 
     if (!cmdtc) return;
 
-    param_t *param_top = (param_t *)StackGetTopElem (cmdtc->stack);
+    param_t *param_top = (param_t *)StackGetTopElem (cmdtc->params_stack);
   
     if (!cmdtc_is_serialized_buffer_empty (cmdtc->tlv_buffer)) {
 
@@ -159,11 +164,11 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc) {
          }
     }
 
-    /* Get the checkpointed param from stack if any*/
+    /* Get the checkpointed param from params_stack if any*/
     param_t *param_chkp = (cmdtc->stack_checkpoint > 0) ? \
-                        (param_t *)cmdtc->stack->slot[cmdtc->stack_checkpoint] : NULL;
+                        (param_t *)cmdtc->params_stack->slot[cmdtc->stack_checkpoint] : NULL;
 
-    printw ("\nroot = %s, curr_param = %s, stack top = %s, "
+    printw ("\nroot = %s, curr_param = %s, params_stack top = %s, "
                     "chkp = %s, top_index = %d, tlv_top = %s, state = %s, negation = %s", 
             (IS_PARAM_CMD(cmdtc->root) || IS_PARAM_NO_CMD(cmdtc->root)) ? 
                 GET_CMD_NAME(cmdtc->root) : GET_LEAF_ID (cmdtc->root),
@@ -173,7 +178,7 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc) {
                 GET_CMD_NAME(param_top) : GET_LEAF_ID (param_top)) : NULL,            
            param_chkp ? ((IS_PARAM_CMD(param_chkp) || IS_PARAM_NO_CMD(param_chkp)) ? 
                 GET_CMD_NAME(param_chkp) : GET_LEAF_ID (param_chkp)) : NULL,
-            cmdtc->stack->top,
+            cmdtc->params_stack->top,
             tlv_top_name,
             cmdtc_get_state_str (cmdtc),
             cmdtc->is_negate ? "y" : "n");
@@ -186,10 +191,10 @@ cmdtc_get_cmd_trigger_status (cmd_tree_cursor_t *cmdtc) {
 }
 
 bool 
-cmdtc_is_stack_empty (Stack_t *stack) {
+cmdtc_is_params_stack_empty (Stack_t *params_stack) {
 
-    return ((param_t *)stack->slot[stack->top] == libcli_get_root_hook() &&
-                    stack->top == 0);
+    return ((param_t *)params_stack->slot[params_stack->top] == libcli_get_root_hook() &&
+                    params_stack->top == 0);
 }
 
 bool 
@@ -208,8 +213,16 @@ cmdtc_is_serialized_buffer_empty (ser_buff_t *tlv_buffer) {
 void 
 cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
 
-    push(cmdtc->stack, (void *)cmdtc->curr_param);
+    push(cmdtc->params_stack, (void *)cmdtc->curr_param);
     cmd_tree_collect_param_tlv(cmdtc->curr_param, cmdtc->tlv_buffer);
+
+    #if 0
+    if (IS_PARAM_LEAF (cmdtc->curr_param)) {
+        memset (GET_LEAF_VALUE_PTR(cmdtc->curr_param), 0, 
+            LEAF_VALUE_HOLDER_SIZE);
+    }
+    #endif
+    
     cmdtc->icursor = 0;
     cmdtc->cmdtc_state = cmdt_cur_state_init;
     while (dequeue_glthread_first(&cmdtc->matching_params_list));
@@ -225,9 +238,9 @@ cmdtc_is_cursor_at_apex_root (cmd_tree_cursor_t *cmdtc) {
     bool rc;
     rc = (cmdtc->curr_param == libcli_get_root_hook ());
     if (rc) {
-        assert (!isStackEmpty (cmdtc->stack));
-        assert (cmdtc->stack->top == 0);
-        assert (cmdtc->stack->slot[0] == libcli_get_root_hook());
+        assert (!isStackEmpty (cmdtc->params_stack));
+        assert (cmdtc->params_stack->top == 0);
+        assert (cmdtc->params_stack->slot[0] == libcli_get_root_hook());
         assert (!serialize_buffer_get_size(cmdtc->tlv_buffer));
     }
     return rc;
@@ -249,15 +262,17 @@ cmd_tree_cursor_move_one_level_up (
     switch (cmdtc->cmdtc_state) {
         case cmdt_cur_state_init:
             if (cmdtc->curr_param == libcli_get_root_hook()) return 0;
-            assert (cmdtc->curr_param == (param_t *)StackGetTopElem(cmdtc->stack));
+            assert (cmdtc->curr_param == (param_t *)StackGetTopElem(cmdtc->params_stack));
             if (honor_checkpoint) {
-                if (cmdtc->stack_checkpoint == cmdtc->stack->top) return 0; 
+                if (cmdtc->stack_checkpoint == cmdtc->params_stack->top) return 0; 
             }
-            /* Lower down the checkpoint of the stack if we are at checkpoint*/
-            if (cmdtc->stack_checkpoint == cmdtc->stack->top) {
+            /* Lower down the checkpoint of the params_stack if we are at checkpoint*/
+            if (cmdtc->stack_checkpoint == cmdtc->params_stack->top) {
                 cmdtc->stack_checkpoint--;
             }
-            pop(cmdtc->stack);
+            
+            pop(cmdtc->params_stack);
+            
             count = (IS_PARAM_CMD (cmdtc->curr_param) || IS_PARAM_NO_CMD(cmdtc->curr_param)) ? \
                             cmdtc->curr_param->cmd_type.cmd->len : \
                             strlen(GET_LEAF_VALUE_PTR(cmdtc->curr_param));
@@ -267,7 +282,11 @@ cmd_tree_cursor_move_one_level_up (
                 cmdtc->is_negate = false;
             }
 
-            cmdtc->curr_param =  (param_t *)StackGetTopElem(cmdtc->stack);
+            if (IS_PARAM_LEAF (cmdtc->curr_param)) {
+                memset (GET_LEAF_VALUE_PTR(cmdtc->curr_param), 0, LEAF_VALUE_HOLDER_SIZE);
+            }
+
+            cmdtc->curr_param =  (param_t *)StackGetTopElem(cmdtc->params_stack);
             
             /* This fn is called for PAGE_UP and BACKSPACE. We need to update root
                 only in case of PAGE_UP only*/
@@ -315,12 +334,12 @@ cmd_tree_cursor_move_one_level_up (
             count = cmdtc->icursor ;
             cmdtc->icursor = 0;
             cmdtc->cmdtc_state =  cmdt_cur_state_init;
-            if (cmdtc_is_stack_empty (cmdtc->stack)) {
+            if (cmdtc_is_params_stack_empty (cmdtc->params_stack)) {
                 cmdtc->curr_param = libcli_get_root_hook();
                 break;
             }
-            assert (cmdtc->curr_param != (param_t *)StackGetTopElem(cmdtc->stack));
-            cmdtc->curr_param = (param_t *)StackGetTopElem(cmdtc->stack);           
+            assert (cmdtc->curr_param != (param_t *)StackGetTopElem(cmdtc->params_stack));
+            cmdtc->curr_param = (param_t *)StackGetTopElem(cmdtc->params_stack);           
             break;
         case cmdt_cur_state_no_match:
             assert(0);
@@ -334,7 +353,7 @@ cmdtc_process_pageup_event (cmd_tree_cursor_t *cmdtc) {
 
     int count;
 
-    if (cmdtc_is_stack_empty (cmdtc->stack)) return 0;
+    if (cmdtc_is_params_stack_empty (cmdtc->params_stack)) return 0;
     count = cmd_tree_cursor_move_one_level_up (cmdtc, false, true);
     return count + 2;   /* 2 is to accomodate ''>" & hyphen sign*/
 }
@@ -857,9 +876,9 @@ cmdtc_is_cursor_at_bottom_mode_node (cmd_tree_cursor_t *cmdtc) {
 }
 
 Stack_t *
-cmdtc_get_stack (cmd_tree_cursor_t *cmdtc) {
+cmdtc_get_params_stack (cmd_tree_cursor_t *cmdtc) {
     
-    return cmdtc->stack;
+    return cmdtc->params_stack;
 }
 
 param_t *
@@ -931,50 +950,50 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     if (cmdtc_is_cursor_at_bottom_mode_node (cmdtc)) return;
 
     /* Handle the case when user wants to enter mode again while he is
-        working in nested mode. Reform the stack/TLV buffer by eliminating all params
+        working in nested mode. Reform the params_stack/TLV buffer by eliminating all params
         which belong to outer command*/
     if (cmdtc_am_i_working_in_nested_mode(cmdtc)) {
 
-        /* Remove all the params from the stack which belongs to outer command
-        i.e. (stack[0] (root),  stack[stack->checkpoint] ] ). Mark the top of the stack
+        /* Remove all the params from the params_stack which belongs to outer command
+        i.e. (params_stack[0] (root),  params_stack[params_stack->checkpoint] ] ). Mark the top of the params_stack
         as new checkpoint. Note : '( ' means excluding, ']' means including*/
-        while (cmdtc->stack->top > cmdtc->stack_checkpoint) {
+        while (cmdtc->params_stack->top > cmdtc->stack_checkpoint) {
 
-                param = (param_t *)pop(cmdtc->stack);
+                param = (param_t *)pop(cmdtc->params_stack);
                 assert(!IS_QUEUED_UP_IN_THREAD(&param->glue));
                 glthread_add_next(&temp_list, &param->glue);
         }
 
         /* Remove the universal tags from outer command's checkpointed param*/
-        cmd_tree_uninstall_universal_params ((param_t *)StackGetTopElem(cmdtc->stack));
+        cmd_tree_uninstall_universal_params ((param_t *)StackGetTopElem(cmdtc->params_stack));
 
-        while (!cmdtc_is_stack_empty (cmdtc->stack)) {
-            pop(cmdtc->stack);
+        while (!cmdtc_is_params_stack_empty (cmdtc->params_stack)) {
+            pop(cmdtc->params_stack);
         }
 
         /* Lets obey our design and rebuild the serialize buffer so that tlv buffer comply with
-            the stack*/
+            the params_stack*/
         reset_serialize_buffer (cmdtc->tlv_buffer);
 
         while ((curr = dequeue_glthread_first(&temp_list))) {
 
             param = glue_to_param(curr);
-            push(cmdtc->stack, (void *)param);
+            push(cmdtc->params_stack, (void *)param);
             cmd_tree_collect_param_tlv (param, cmdtc->tlv_buffer);
         }
         
-        cmdtc->stack_checkpoint = cmdtc->stack->top;
+        cmdtc->stack_checkpoint = cmdtc->params_stack->top;
         serialize_buffer_mark_checkpoint (cmdtc->tlv_buffer);
         cmdtc->root = libcli_get_root_hook ();
-        cmdtc->curr_param = (param_t *)StackGetTopElem(cmdtc->stack);
+        cmdtc->curr_param = (param_t *)StackGetTopElem(cmdtc->params_stack);
     }
 
 
     /* Algorithm to enter mode starts here */
 
-    /* Drain the complete stack temporarily, we will rebuilt it as it is*/
-    while (!cmdtc_is_stack_empty (cmdtc->stack)) {
-        param = (param_t *)pop (cmdtc->stack);
+    /* Drain the complete params_stack temporarily, we will rebuilt it as it is*/
+    while (!cmdtc_is_params_stack_empty (cmdtc->params_stack)) {
+        param = (param_t *)pop (cmdtc->params_stack);
         assert (!IS_QUEUED_UP_IN_THREAD (&param->glue));
         glthread_add_next (&temp_list, &param->glue);
     }
@@ -1011,14 +1030,14 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
 
     cli_set_hdr (cli, NULL, byte_count);
 
-    /*Since we are about to rebuild the stack, rebuild the serialize buffer as
-        stack and tlv buffer go hand-in-hand. Hence, drained the older tlv buffer*/
+    /*Since we are about to rebuild the params_stack, rebuild the serialize buffer as
+        params_stack and tlv buffer go hand-in-hand. Hence, drained the older tlv buffer*/
     reset_serialize_buffer (cmdtc->tlv_buffer);
-    /* Rebuild  the stack again, thanks you stack !*/
+    /* Rebuild  the params_stack again, thanks you params_stack !*/
     while ((curr = dequeue_glthread_first (&temp_list))) {
 
          param = glue_to_param (curr);
-         push (cmdtc->stack , (void *)param);
+         push (cmdtc->params_stack , (void *)param);
          cmd_tree_collect_param_tlv (param, cmdtc->tlv_buffer);
     }
 
@@ -1026,10 +1045,10 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
         cmd_tree_uninstall_universal_params (cmdtc->root);
     }
     /* Save the context of where we are now in CLI tree by updating the root,
-        and checkpoint the stack and TLV buffer  */
+        and checkpoint the params_stack and TLV buffer  */
     cmdtc->root = cmdtc->curr_param;
     serialize_buffer_mark_checkpoint (cmdtc->tlv_buffer);
-    cmdtc->stack_checkpoint = cmdtc->stack->top;
+    cmdtc->stack_checkpoint = cmdtc->params_stack->top;
 
     cmd_tree_install_universal_params (cmdtc->root, cmdtc_get_branch_hook(cmdtc));
     /* Finally display the new  prompt to the user */
@@ -1043,12 +1062,12 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
 
     param_t *param;
 
-    assert(cmdtc->stack->top >= cmdtc->stack_checkpoint);
+    assert(cmdtc->params_stack->top >= cmdtc->stack_checkpoint);
 
-    /* Restore the stack to the checkpoint */
-    while (cmdtc->stack->top > cmdtc->stack_checkpoint) {
+    /* Restore the params_stack to the checkpoint */
+    while (cmdtc->params_stack->top > cmdtc->stack_checkpoint) {
 
-        param = (param_t *)pop(cmdtc->stack);
+        param = (param_t *)pop(cmdtc->params_stack);
 
         if (IS_PARAM_LEAF(param)) {
             memset (GET_LEAF_VALUE_PTR(param), 0, LEAF_VALUE_HOLDER_SIZE);
@@ -1098,20 +1117,20 @@ Ex : Soft-Firewall>$ config-mtrace-source> show ip igmp configuration
 
     if (!cli_is_char_mode_on()) return false;
     if ( !cmdtc_am_i_working_in_mode (cmdtc)) return false;
-    if (cmdtc->stack->top == cmdtc->stack_checkpoint) return false;
-    return param_is_hook ((param_t *)cmdtc->stack->slot[cmdtc->stack_checkpoint + 1]);
+    if (cmdtc->params_stack->top == cmdtc->stack_checkpoint) return false;
+    return param_is_hook ((param_t *)cmdtc->params_stack->slot[cmdtc->stack_checkpoint + 1]);
  }
 
 param_t *
 cmdtc_get_branch_hook (cmd_tree_cursor_t *cmdtc) {
    
-    if (cmdtc_is_stack_empty (cmdtc->stack)) return NULL;
+    if (cmdtc_is_params_stack_empty (cmdtc->params_stack)) return NULL;
     
     if (!cmdtc_am_i_working_in_nested_mode (cmdtc)) {    
-        return  (param_t *)(cmdtc->stack->slot[1]);
+        return  (param_t *)(cmdtc->params_stack->slot[1]);
     }
 
-    return (param_t *)cmdtc->stack->slot[cmdtc->stack_checkpoint + 1];
+    return (param_t *)cmdtc->params_stack->slot[cmdtc->stack_checkpoint + 1];
 }
 
 /* CLI Trigger Code */
@@ -1137,19 +1156,19 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
     cmd_tree_cursor_t *temp_cmdtc = NULL;
    
     /* if user is in nested mode, then we will use temporary cmdtc because
-        original cmdtc's stack and TLV buffer we dont want */
+        original cmdtc's params_stack and TLV buffer we dont want */
     if ( cmdtc_am_i_working_in_nested_mode (cli_cmdtc)) {
 
         cmd_tree_cursor_init (&temp_cmdtc);
         cmdtc = temp_cmdtc;
 
-        /* Rebuild the stack and TLV buffer from scratch*/
-        for (i = cli_cmdtc->stack_checkpoint + 1 ; i <= cli_cmdtc->stack->top; i++) {
-            param = (param_t *) cli_cmdtc->stack->slot[i];
-            push (cmdtc->stack, (void *)param);
+        /* Rebuild the params_stack and TLV buffer from scratch*/
+        for (i = cli_cmdtc->stack_checkpoint + 1 ; i <= cli_cmdtc->params_stack->top; i++) {
+            param = (param_t *) cli_cmdtc->params_stack->slot[i];
+            push (cmdtc->params_stack, (void *)param);
             cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
         }
-        cmdtc->curr_param = (param_t *) StackGetTopElem (cmdtc->stack);
+        cmdtc->curr_param = (param_t *) StackGetTopElem (cmdtc->params_stack);
     }
     else {
         cmdtc = cli_cmdtc;
@@ -1186,7 +1205,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
     if (enable_or_diable == OPERATIONAL ||
             enable_or_diable == CONFIG_DISABLE) {
 
-        param = (param_t *)StackGetTopElem(cmdtc->stack);
+        param = (param_t *)StackGetTopElem(cmdtc->params_stack);
 
         if (param->callback (param, cmdtc->tlv_buffer, enable_or_diable)) {
             cli_cmdtc->success = false;
@@ -1198,9 +1217,9 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
 
     /* Handle Trigger of Config Command. Config Commands are triggered in
         patches !*/
-    for (i = cmdtc->stack_checkpoint + 1 ; i <= cmdtc->stack->top; i++) {
+    for (i = cmdtc->stack_checkpoint + 1 ; i <= cmdtc->params_stack->top; i++) {
 
-        param = (param_t *)cmdtc->stack->slot[i];
+        param = (param_t *)cmdtc->params_stack->slot[i];
 
         if (!param->callback)  {
             count++;
@@ -1245,7 +1264,7 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
             cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
             return;
         case cmdt_cur_state_single_word_match:
-            /* Auto complete the word , push into the stack and TLV buffer and fire the CLI*/
+            /* Auto complete the word , push into the params_stack and TLV buffer and fire the CLI*/
             /* only one option is matching and that is fixed word , do auto-completion*/
             while (GET_CMD_NAME(cmdtc->curr_param)[cmdtc->icursor] != '\0') {
                 cli_process_key_interrupt (
@@ -1269,7 +1288,7 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
                 cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
                 return;
             }            
-            /* Push it into the stack and Fire the CLI*/
+            /* Push it into the params_stack and Fire the CLI*/
             cmd_tree_cursor_move_to_next_level (cmdtc);
             cmd_tree_trigger_cli (cmdtc);
             if (cmdtc->success) {  cmd_tree_post_cli_trigger (cli);   }
@@ -1321,14 +1340,14 @@ cmdtc_parse_full_command (cli_t *cli) {
     /* Now Three Cases arises. Lets cover one by one and use cmdtc accordingly. */
 
 
-    /* Case 1 : If we have picked up the CLI from history, then take a new temp cursor.  We only need to use its stack and TLV buffer */
+    /* Case 1 : If we have picked up the CLI from history, then take a new temp cursor.  We only need to use its params_stack and TLV buffer */
     if (cli_is_historical (cli)) {
         cmd_tree_cursor_init (&cmdtc);
         is_new_cmdtc = true;
     }
     
     /*Case 2 :  If in mode (line mode also), user has typed out the command starting from hook 
-    ( first token is a hook), then also take a new cmdtc because we dont need existing stack and TLV buffer*/
+    ( first token is a hook), then also take a new cmdtc because we dont need existing params_stack and TLV buffer*/
     else if (cmd_tree_is_token_a_hook (*(tokens+ 0))) {
         cmd_tree_cursor_init (&cmdtc);
         is_new_cmdtc = true;
@@ -1338,7 +1357,7 @@ cmdtc_parse_full_command (cli_t *cli) {
     else {
         /* The user is working in line mode with default_cli only which is tied to a
             cursor. Could be possible that user is working in Mode. We will use this
-            cursor stack and TLV buffer now since we would need checkpointed data
+            cursor params_stack and TLV buffer now since we would need checkpointed data
             to fire the CLI
             Consider below scenatio, assume user is woring in line mode 
             Soft-Firewall>$ config-mtrace-source> 1.1.1.1 destination 2.2.2.2
@@ -1410,17 +1429,17 @@ cmdtc_parse_full_command (cli_t *cli) {
             put_value_in_tlv((&tlv), *(tokens +i));
             strncpy (GET_LEAF_VALUE_PTR (param), *(tokens +i), strlen (*(tokens +i)));
             collect_tlv(cmdtc->tlv_buffer, &tlv);
-            push(cmdtc->stack, (void *)param);
+            push(cmdtc->params_stack, (void *)param);
         }
         else if (IS_PARAM_CMD(param)){
             cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
-            push(cmdtc->stack, (void *)param);
+            push(cmdtc->params_stack, (void *)param);
         }
         else if (IS_PARAM_NO_CMD (param)) {
             if (!cmdtc->is_negate) {
                 cmdtc->is_negate = true;
                 cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
-                push(cmdtc->stack, (void *)param);
+                push(cmdtc->params_stack, (void *)param);
             }
             else {
                 /* Negation appearing more than once in the command, ignore the subsequent
