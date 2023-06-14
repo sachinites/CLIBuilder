@@ -19,6 +19,16 @@ static param_t config;
 static param_t clearp;
 static param_t run;
 
+/* Working with Filters */
+static param_t pipe;
+static param_t count;
+static param_t save;
+static param_t save_file;
+static param_t include;
+static param_t include_leaf;
+static param_t exclude;
+ static param_t exclude_leaf;
+
 static param_t *universal_params[] = {&show, &config};
 
 void
@@ -260,6 +270,7 @@ cmd_tree_display_all_complete_commands(
 
         if (root->flags & PARAM_F_NO_EXPAND) return;
         if (IS_PARAM_NO_CMD(root)) return;
+        if (root->flags & PARAM_F_NO_EXPAND) return;
         
         if (IS_PARAM_CMD(root)){
             untokenize(index);
@@ -293,7 +304,9 @@ cmd_tree_install_universal_params (param_t *param, param_t *branch_hook) {
     
     while (true) {
 
-        if (i > CHILDREN_END_INDEX) return;
+        /* If it assers here, it means you have run out of space, consider increase
+            the value of MAX_OPTION_SIZE */
+        if (i > CHILDREN_END_INDEX) assert(0);
 
         if (param->options[i]) {
             i++;
@@ -451,19 +464,20 @@ libcli_support_cmd_negation (param_t *param) {
     param->options[i] = negate_param;
 }
 
-/* Working with Filters */
-
-static param_t pipe;
-static param_t include_leaf;
-static param_t exclude;
-static param_t exclude_leaf;
-
 static void
 cmd_tree_construct_filter_subtree () {
 
     init_param (&pipe, CMD, "|", NULL, NULL, INVALID, NULL, "pipe");
+    pipe.flags |= (PARAM_F_NO_EXPAND );
+    init_param (&count, CMD, "count", NULL, NULL, INVALID, NULL, "count lines");
+    init_param (&save, CMD, "save", NULL, NULL, INVALID, NULL, "save to a file");
+    init_param (&save_file, LEAF, NULL, NULL, NULL, STRING, "sfile-name", "file name");
+    libcli_register_param (&save, &save_file);
+
+    libcli_register_param (&pipe, &count);
+    libcli_register_param (&pipe, &save);
+
     {
-        static param_t include;
         init_param (&include,  CMD, "include", NULL, NULL, INVALID, NULL, "Include Pattern");
         libcli_register_param (&pipe, &include);
         {
@@ -473,7 +487,6 @@ cmd_tree_construct_filter_subtree () {
         }
     }
     {
-        static param_t exclude;
         init_param (&exclude,  CMD, "exclude", NULL, NULL, INVALID, NULL, "Exclude Pattern");
         libcli_register_param (&pipe, &exclude);
         {
@@ -485,9 +498,27 @@ cmd_tree_construct_filter_subtree () {
 }
 
 static void 
+libcli_augment_show_cmds_internal (param_t *param) {
+
+    int i;
+    if (!param) return;
+    if (param->flags & PARAM_F_NO_EXPAND) return;
+    if (param == &pipe) return;
+    
+    for (i = CHILDREN_START_INDEX ; i <= CHILDREN_END_INDEX; i++) {
+        libcli_augment_show_cmds_internal (param->options[i]);
+    }
+
+    if (param->callback) {
+        libcli_register_param (param, &pipe);
+    }
+}
+
+static void 
  libcli_augment_show_cmds () {
 
-   // libcli_register_param (&show, &pipe);
+    param_t *show_param = libcli_get_show_hook();
+    libcli_augment_show_cmds_internal (show_param);
  }
 
  void 
@@ -504,4 +535,19 @@ libcli_init_done () {
     libcli_support_cmd_negation (libcli_get_config_hook());
     cmd_tree_construct_filter_subtree();
     libcli_augment_show_cmds ();
+}
+
+bool 
+cmd_tree_is_param_pipe (param_t *param) {
+
+    return param == &pipe;
+}
+
+bool 
+cmd_tree_is_filter_param (param_t *param) {
+
+    return (param == &pipe || param == &count || param == &save ||
+                param == &save_file || param == &include || 
+                param == &include_leaf || param == &exclude ||
+                param == &exclude_leaf);
 }

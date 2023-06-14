@@ -240,6 +240,10 @@ cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
     if (IS_PARAM_NO_CMD (cmdtc->curr_param)) {
         cmdtc->is_negate = true;
     }
+    if (cmd_tree_is_param_pipe (cmdtc->curr_param) &&
+        cmdtc->filter_checkpoint == -1) {
+        cmdtc->filter_checkpoint = cmdtc->params_stack->top;
+    }
 }
 
 bool 
@@ -275,9 +279,15 @@ cmd_tree_cursor_move_one_level_up (
         case cmdt_cur_state_init:
             if (cmdtc->curr_param == libcli_get_root_hook()) return 0;
             assert (cmdtc->curr_param == (param_t *)StackGetTopElem(cmdtc->params_stack));
+
             if (honor_checkpoint) {
                 if (cmdtc->stack_checkpoint == cmdtc->params_stack->top) return 0; 
             }
+
+            if (cmdtc->filter_checkpoint == cmdtc->params_stack->top) {
+                    cmdtc->filter_checkpoint = -1;
+            }
+
             /* Lower down the checkpoint of the params_stack if we are at checkpoint*/
             if (cmdtc->stack_checkpoint == cmdtc->params_stack->top) {
                 cmdtc->stack_checkpoint--;
@@ -325,7 +335,7 @@ cmd_tree_cursor_move_one_level_up (
                 from. In this case, move one level up*/
                 return cmd_tree_cursor_move_one_level_up (cmdtc, honor_checkpoint, update_root);
             }
-            break;        
+            break; 
         case cmdt_cur_state_single_word_match: 
         case cmdt_cur_state_matching_leaf:
             if (cmdtc->leaf_param) {
@@ -537,8 +547,11 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
     ITERATE_GLTHREAD_BEGIN (&cmdtc->matching_params_list, curr) {
 
         param = glue_to_param (curr);
+        
         if (IS_PARAM_NO_CMD (param) &&
                 cmdtc->is_negate) continue;
+        
+        if (param->flags & PARAM_F_NO_DISPLAY_QUESMARK) continue;
 
         printw ("\nnxt cmd  -> %-31s   |   %s", 
             GET_CMD_NAME(param), 
@@ -546,7 +559,7 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
 
     } ITERATE_GLTHREAD_END (&cmdtc->matching_params_list, curr);
 
-    if (cmdtc->leaf_param) {
+    if (cmdtc->leaf_param && !(cmdtc->leaf_param->flags & PARAM_F_NO_DISPLAY_QUESMARK)) {
         
         printw ("\nnxt cmd  -> %-32s   |   %s", 
             GET_LEAF_TYPE_STR(cmdtc->leaf_param), 
@@ -572,6 +585,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
     switch (cmdtc->cmdtc_state) {
 
         case cmdt_cur_state_init:
+
             /* User is typing ' ' even without typing any character for the next word
             In this case, if there is only one alternate option, then only go for
             auto-completion. In rest of the cases, block user and display alternatives*/
@@ -658,6 +672,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
 
         case cmdt_cur_state_single_word_match:
+
             /* only one option is matching and that is fixed word , do auto-completion*/
             while (GET_CMD_NAME(cmdtc->curr_param)[cmdtc->icursor] != '\0') {
                 cli_process_key_interrupt (
@@ -1025,7 +1040,10 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     /* Drain the complete params_stack temporarily, we will rebuilt it as it is*/
     while (!cmdtc_is_params_stack_empty (cmdtc->params_stack)) {
         param = (param_t *)pop (cmdtc->params_stack);
-        assert (!IS_QUEUED_UP_IN_THREAD (&param->glue));
+        /* Filter params can appear multiple times in stack*/
+        if (!cmd_tree_is_filter_param (param)) {
+            assert (!IS_QUEUED_UP_IN_THREAD (&param->glue));
+        }
         glthread_add_next (&temp_list, &param->glue);
     }
 
@@ -1171,6 +1189,21 @@ cmd_tree_post_cli_trigger (cli_t *cli) {
     cli_record_copy (cli_get_default_history(), cli);
 }
 
+static param_t *
+cmdtc_get_last_cbk_param (cmd_tree_cursor_t *cmdtc) {
+
+    /* So we have following stack milestones markers 
+        1. stack top
+        2. filter checkpoint
+        3. stack checkpoint
+    */
+   if (cmdtc->filter_checkpoint > -1) {
+        return (param_t *)cmdtc->params_stack->slot[cmdtc->filter_checkpoint - 1];
+   }
+
+   return (param_t *)StackGetTopElem(cmdtc->params_stack);
+}
+
 /* This function eventually submit the CLI to the backend application */
 static void 
 cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
@@ -1194,15 +1227,22 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
             push (cmdtc->params_stack, (void *)param);
             push (cmdtc->tlv_stack, (void *)cli_cmdtc->tlv_stack->slot[i]);
         }
+        
+        /* Compute the new Filter checkpoint by removing the params of the outer cmd.*/
+        if (cli_cmdtc->filter_checkpoint > -1) {
+            cmdtc->filter_checkpoint = cli_cmdtc->filter_checkpoint - cli_cmdtc->stack_checkpoint;
+        }
+
         cmdtc->curr_param = (param_t *) StackGetTopElem (cmdtc->params_stack);
     }
     else {
         cmdtc = cli_cmdtc;
     }
 
-    /* Do not trigger the CLI if the user has not typed CLI to the
-        completion*/
-    if (!cmdtc->curr_param->callback) {
+    /* Do not trigger the CLI if the user has not typed CLI to the completion*/
+    param = cmdtc_get_last_cbk_param (cmdtc);
+
+    if (!param->callback) {
         attron(COLOR_PAIR(RED_ON_BLACK));
         printw("\nError : Incomplete CLI...");
         attroff(COLOR_PAIR(RED_ON_BLACK));
@@ -1227,8 +1267,6 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         types are triggered in same way - just once*/
     if (enable_or_diable == OPERATIONAL ||
             enable_or_diable == CONFIG_DISABLE) {
-
-        param = (param_t *)StackGetTopElem(cmdtc->params_stack);
 
         if (param->callback (param, cmdtc->tlv_stack, enable_or_diable)) {
             cli_cmdtc->success = false;
@@ -1424,8 +1462,6 @@ cmdtc_parse_full_command (cli_t *cli) {
                     GET_LEAF_TYPE_STR(param));
                 attroff(COLOR_PAIR(RED_ON_BLACK));
 
-                
-
                 if (is_new_cmdtc) {
                     cmd_tree_cursor_destroy_internals(cmdtc, true);
                     free(cmdtc);
@@ -1436,7 +1472,7 @@ cmdtc_parse_full_command (cli_t *cli) {
 
                 free(tlvptr);
                 return false;
-            } 
+            }
             free(tlvptr);
 
             if (param->cmd_type.leaf->user_validation_cb_fn &&
@@ -1461,10 +1497,17 @@ cmdtc_parse_full_command (cli_t *cli) {
             push (cmdtc->tlv_stack, (void *)cmd_tree_convert_param_to_tlv (
                                         param, (unsigned char *)*(tokens +i)));
         }
+
         else if (IS_PARAM_CMD(param)){
             push(cmdtc->params_stack, (void *)param);
             push (cmdtc->tlv_stack, (void *)cmd_tree_convert_param_to_tlv (param, NULL));
+
+            /* Set the filter checkpoint if we encounter the first pipe*/
+            if (cmd_tree_is_param_pipe (param) && cmdtc->filter_checkpoint == -1) {
+                cmdtc->filter_checkpoint = cmdtc->params_stack->top;
+            }
         }
+
         else if (IS_PARAM_NO_CMD (param)) {
             if (!cmdtc->is_negate) {
                 cmdtc->is_negate = true;
@@ -1478,8 +1521,8 @@ cmdtc_parse_full_command (cli_t *cli) {
         }
     }
 
-    /* Set the last param which holds the callback*/
-    cmdtc->curr_param = param; 
+    /* Set the curr param to the top of the stack */
+    cmdtc->curr_param = (param_t *)StackGetTopElem (cmdtc->params_stack);
     cmd_tree_trigger_cli (cmdtc);
 
     if (cmdtc->success) { 

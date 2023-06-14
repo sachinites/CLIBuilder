@@ -59,6 +59,7 @@ GLTHREAD_TO_STRUCT (glue_to_param, param_t, glue);
 #define GET_LEAF_ID(param)          (GET_PARAM_LEAF(param)->leaf_id)
 
 #define PARAM_F_NO_EXPAND   1
+#define PARAM_F_NO_DISPLAY_QUESMARK 2
 
 void 
 cmd_tree_init ();
@@ -111,5 +112,11 @@ cmd_tree_is_token_a_hook (char *token) ;
 
 param_t*
 cmd_tree_find_matching_param (param_t **options, const char *cmd_name);
+
+bool 
+cmd_tree_is_param_pipe (param_t *param);
+
+bool 
+cmd_tree_is_filter_param (param_t *param);
 
 #endif 
