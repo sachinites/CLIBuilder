@@ -36,42 +36,51 @@ list_vlans(param_t *param, ser_buff_t *tlv_buf){
 }
 
 int
-show_ip_igmp_groups_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_disable){
+show_ip_igmp_groups_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
 
+    tlv_struct_t *tlv;
+#if 1
     printf ("\nenable or disable = %d", enable_or_disable);
-    dump_tlv_serialized_buffer(tlv_buf);
-    
-#if 0
-    TLV_LOOP(tlv_buf, tlv, i){
-        if(strncmp(tlv->leaf_id, "group-ip", strlen("group-ip")) == 0){
-            printf("Group Ip Recvd in application = %s\n", tlv->value);   
-        }
-        else if(strncmp(tlv->leaf_id, "vlan-id", strlen("vlan-id")) == 0){
-            printf("vlan recieved in application = %s\n", tlv->value);
-        }
+    TLV_LOOP_STACK_BEGIN (tlv_stack, tlv) {
+
+        print_tlv_content (tlv);
+
+    } TLV_LOOP_END;
+#else 
+    Stack_t *stack = (Stack_t *)tlv_buf;
+    int i;
+    for (i = 0; i <= stack->top; i++) {
+        tlv_struct_t *tlv = (tlv_struct_t *)stack->slot[i];
+        print_tlv_content (tlv);
     }
+
 #endif
     return 0;
 }
 
 int
-mtrace_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_disable){
+mtrace_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
 
     printf ("\nenable or disable = %d", enable_or_disable);
-    dump_tlv_serialized_buffer(tlv_buf);
+    tlv_struct_t *tlv;
+    TLV_LOOP_STACK_BEGIN (tlv_stack, tlv) {
+
+        print_tlv_content (tlv);
+
+    } TLV_LOOP_END;
     return 0;
 }
 
 
 int
-config_router_name_handler(param_t *param, ser_buff_t *tlv_buf, op_mode enable_or_disable){
+config_router_name_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
 
     return 0;
 }
 
 
 int
-user_vlan_validation_callback(ser_buff_t *ser_buff, char *vlan_id){
+user_vlan_validation_callback(Stack_t *tlv_stack, char *vlan_id){
 
     int vlan_no = atoi(vlan_id);
 

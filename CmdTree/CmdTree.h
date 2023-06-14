@@ -8,11 +8,13 @@
 
 typedef struct _param_t_ param_t;
 typedef struct serialized_buffer ser_buff_t;
+typedef struct tlv_struct  tlv_struct_t;
+typedef struct stack Stack_t;
 
-typedef int (*user_validation_callback)(ser_buff_t *, unsigned char *leaf_value);
-typedef void (*display_possible_values_callback)(param_t *, ser_buff_t *);
+typedef int (*user_validation_callback)(Stack_t *, unsigned char *leaf_value);
+typedef void (*display_possible_values_callback)(param_t *, Stack_t *);
 typedef int (*cmd_callback)(param_t *param, 
-                                              ser_buff_t *tlv_buf, 
+                                              Stack_t *tlv_stack,
                                               op_mode enable_or_diable);
 
 typedef struct cmd{
@@ -22,7 +24,6 @@ typedef struct cmd{
 
 typedef struct leaf {
     leaf_type_t leaf_type;
-    char value_holder[LEAF_VALUE_HOLDER_SIZE];
     user_validation_callback user_validation_cb_fn;
     char leaf_id[LEAF_ID_SIZE];/*Within a single command, it should be unique*/
 } leaf_t;
@@ -52,7 +53,6 @@ GLTHREAD_TO_STRUCT (glue_to_param, param_t, glue);
 #define IS_PARAM_CMD(param)     (param->param_type == CMD)
 #define IS_PARAM_LEAF(param)    (param->param_type == LEAF)
 #define GET_LEAF_TYPE_STR(param)    (get_str_leaf_type(GET_PARAM_LEAF(param)->leaf_type))
-#define GET_LEAF_VALUE_PTR(param)   (GET_PARAM_LEAF(param)->value_holder)
 #define GET_LEAF_TYPE(param)        (GET_PARAM_LEAF(param)->leaf_type)
 #define GET_CMD_NAME(param)         (GET_PARAM_CMD(param)->cmd_name)
 #define GET_PARAM_HELP_STRING(param) (param->help)
@@ -87,10 +87,10 @@ param_t *
 libcli_get_no_hook(void);
 
 bool
-cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char c, int index);
+cmd_tree_leaf_char_save (unsigned char *curr_leaf_value, unsigned char c, int index);
 
-void 
-cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff);
+tlv_struct_t *
+cmd_tree_convert_param_to_tlv (param_t *param, unsigned char *curr_leaf_value);
 
 void
 cmd_tree_display_all_complete_commands(

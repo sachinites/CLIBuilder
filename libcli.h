@@ -2,6 +2,7 @@
 #define __LIBCLI__
 
 #include <ncurses.h>
+#include "stack/stack.h"
 #include "KeyProcessor/KeyProcessor.h"
 #include "CmdTree/CmdTree.h"
 #include "cmdtlv.h"

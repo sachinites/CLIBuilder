@@ -5,7 +5,6 @@ CLILIB=libcli.a
 TARGET:${CLILIB} testapp.exe
 OBJ=KeyProcessor/KeyProcessor.o \
 		 string_util.o \
-		 serializer/serialize.o \
 		 stack/stack.o \
 		 CmdTree/CmdTree.o \
 		 CmdTree/clistd.o \
@@ -16,10 +15,6 @@ OBJ=KeyProcessor/KeyProcessor.o \
 KeyProcessor/KeyProcessor.o:KeyProcessor/KeyProcessor.cpp
 	@echo "Building KeyProcessor/KeyProcessor.o"
 	@ ${CC} ${CFLAGS} -c ${INCLUDES} KeyProcessor/KeyProcessor.cpp -o KeyProcessor/KeyProcessor.o
-
-serializer/serialize.o:serializer/serialize.c
-	@echo "Building serialize.o"
-	@ ${CC} ${CFLAGS} -c ${INCLUDES} serializer/serialize.c -o serializer/serialize.o
 
 stack/stack.o:stack/stack.c
 	@echo "Building stack/stack.o"
@@ -65,7 +60,6 @@ clean:
 	rm -f KeyProcessor/*.o
 	rm -f stack/*.o 
 	rm -f gluethread/*.o 
-	rm -f serializer/*.o 
 	rm -f ${CLILIB}
 install:
 	cp ${CLILIB} /usr/local/lib/

@@ -217,42 +217,37 @@ libcli_get_run_hook(void)
 }
 
 bool
-cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char c, int index) {
+cmd_tree_leaf_char_save (unsigned char *curr_leaf_value, unsigned char c, int index) {
 
-    assert (IS_PARAM_LEAF (leaf_param));
     if (index == LEAF_VALUE_HOLDER_SIZE) return false;
-    GET_LEAF_VALUE_PTR(leaf_param)[index] = c;
+    curr_leaf_value[index] = c;
     return true;
 }
 
-void 
-cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff) {
+tlv_struct_t *
+cmd_tree_convert_param_to_tlv (param_t *param, unsigned char *curr_leaf_value) {
 
-     tlv_struct_t tlv;
-
-     memset(&tlv, 0, sizeof(tlv_struct_t));
+     tlv_struct_t *tlv = (tlv_struct_t *)calloc (1, sizeof (tlv_struct_t));
 
     if (IS_PARAM_CMD (param)) {
         
-        tlv.tlv_type = TLV_TYPE_CMD_NAME;
-        tlv.leaf_type = STRING;
-        put_value_in_tlv((&tlv), GET_CMD_NAME(param));
-        collect_tlv(ser_buff, &tlv);
+        tlv->tlv_type = TLV_TYPE_CMD_NAME;
+        tlv->leaf_type = STRING;
+        put_value_in_tlv((tlv), GET_CMD_NAME(param));
     }
     else if (IS_PARAM_NO_CMD (param)) {
         
-        tlv.tlv_type = TLV_TYPE_NEGATE;
-        tlv.leaf_type = STRING;
-        put_value_in_tlv((&tlv), GET_CMD_NAME(param));
-        collect_tlv(ser_buff, &tlv);
+        tlv->tlv_type = TLV_TYPE_NEGATE;
+        tlv->leaf_type = STRING;
+        put_value_in_tlv((tlv), GET_CMD_NAME(param));
     }
     else {
         
-        tlv.tlv_type = TLV_TYPE_NORMAL;
-        prepare_tlv_from_leaf(GET_PARAM_LEAF(param), (&tlv));
-        put_value_in_tlv((&tlv), GET_LEAF_VALUE_PTR(param));
-        collect_tlv(ser_buff, &tlv);
+        tlv->tlv_type = TLV_TYPE_NORMAL;
+        prepare_tlv_from_leaf(GET_PARAM_LEAF(param), (tlv));
+        put_value_in_tlv((tlv), (const char *)curr_leaf_value);
     }
+    return tlv;
 }
 
 static unsigned char temp[ LEAF_ID_SIZE + 2];
@@ -488,7 +483,6 @@ cmd_tree_construct_filter_subtree () {
         }
     }    
 }
-
 
 static void 
  libcli_augment_show_cmds () {

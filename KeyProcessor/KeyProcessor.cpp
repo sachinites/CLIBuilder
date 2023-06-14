@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include "../stack/stack.h"
 #include "../cli_const.h"
+#include "cmdtlv.h"
 #include "KeyProcessor.h"
 #include "CmdTree/CmdTree.h"
 #include "CmdTree/CmdTreeCursor.h"
@@ -129,20 +130,18 @@ cli_is_same (cli_t *cli1, cli_t *cli2) {
 
 static cli_t *cli_clone (cli_t *cli) {
 
-    param_t *param;
+    tlv_struct_t *tlv;
     int top = 1, rc = 0;
     Stack_t *stack;
     cli_t *new_cli = (cli_t *)calloc (1, sizeof (cli_t));
     rc = strlen (DEF_CLI_HDR);
     cli_set_hdr (new_cli, (unsigned char *)DEF_CLI_HDR, rc);
     new_cli->cmdtc = NULL;
-    stack = cmdtc_get_params_stack(cli->cmdtc);
+    stack = cmdtc_get_tlv_stack(cli->cmdtc);
     int topx = stack->top + 1;
     while (top != topx) {
-        param = (param_t *)stack->slot[top];
-        rc += sprintf ((char *)new_cli->clibuff + rc , "%s ", 
-            (IS_PARAM_CMD(param) || IS_PARAM_NO_CMD(param)) ? GET_CMD_NAME(param) :
-            GET_LEAF_VALUE_PTR(param));
+        tlv = (tlv_struct_t *)stack->slot[top];
+        rc += sprintf ((char *)new_cli->clibuff + rc , "%s ", tlv->value);
         top++;
     }
     new_cli->cnt = rc;

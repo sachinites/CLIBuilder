@@ -102,6 +102,7 @@ void* pop(Stack_t *stack)
     }
 
     ret = stack->slot[stack->top];
+    stack->slot[stack->top] = NULL;
     stack->top--;
     stack->count_of_pop++;
     return ret;

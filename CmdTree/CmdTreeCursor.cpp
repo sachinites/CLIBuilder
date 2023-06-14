@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <ncurses.h>
 #include "../stack/stack.h"
-#include "../serializer/serialize.h"
 #include "../cmdtlv.h"
 #include "../string_util.h"
 #include "CmdTree.h"
@@ -27,16 +26,17 @@ typedef struct cmd_tree_cursor_ {
     /* The root of the current CLI being triggered. It could be any non-leaf
         param in the CLI history.*/
     param_t *root;
-    /* DS used to store the CLI conext in execution*/
+    /* Stacks used to store the CLI conext in execution*/
     Stack_t *params_stack;
+    /* Tlv Stack used to store the values of individual keywords of CLI.  This should go hand-in-hand
+        with the params_stack. This TLV stack is given to the application eventually for parsing and picking  up CLI values*/
+    Stack_t *tlv_stack;
     /* When entering into Mode, this chkpnt is used to mark the params_stack state*/
     int stack_checkpoint;
-    /* Buffer used to store the values of individual keywords of CLI.  This should go hand-in-hand
-        with the params_stack. This TLV buffer is given to the application eventually for parsing and picking 
-        up CLI values*/
-    ser_buff_t *tlv_buffer;
     /* While parsing the cmd tree, this pointer points to the current param being parsed*/
     param_t *curr_param;
+    /* Temporary place holder to store leaf value currently being typed by the user*/
+    unsigned char curr_leaf_value[LEAF_VALUE_HOLDER_SIZE];
     /* This is the index into Param's keyword/value to track which character is being typed*/
     int icursor;
     /* This is used to track the state of cmd tree in reslation to CLI being executed*/
@@ -49,6 +49,8 @@ typedef struct cmd_tree_cursor_ {
     bool success;
     /* This boolean keeps a track whether it is a negative config command*/
     bool is_negate;
+    /* Filter checkpoint */
+    int filter_checkpoint;
 } cmd_tree_cursor_t;
 
 /* This cursor will be used to prse the CLIs when Operating in Char-by-char Mode*/
@@ -59,7 +61,7 @@ cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc) {
 
     *cmdtc = (cmd_tree_cursor_t *)calloc (1, sizeof (cmd_tree_cursor_t));
     (*cmdtc)->params_stack = get_new_stack();
-    init_serialized_buffer_of_defined_size (&((*cmdtc)->tlv_buffer), TLV_MAX_BUFFER_SIZE);
+    (*cmdtc)->tlv_stack = get_new_stack();
     cmd_tree_cursor_deinit ((*cmdtc));
 }
 
@@ -74,18 +76,20 @@ void
 cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
 
     param_t *param;
+    tlv_struct_t *tlv;
 
-    while ((param = (param_t *)pop(cmdtc->params_stack))) {
-        if (!IS_PARAM_LEAF(param)) continue;
-        memset (GET_LEAF_VALUE_PTR(param), 0, LEAF_VALUE_HOLDER_SIZE);
+    while ((param = (param_t *)pop(cmdtc->params_stack)));
+    while ((tlv = (tlv_struct_t *)pop(cmdtc->tlv_stack))) {
+        free(tlv);
     }
     push (cmdtc->params_stack, (void *)libcli_get_root_hook());
+    push (cmdtc->tlv_stack, (tlv_struct_t *)cmd_tree_convert_param_to_tlv 
+                (libcli_get_root_hook(), NULL));
     cmdtc->stack_checkpoint = cmdtc->params_stack->top;
-    reset_serialize_buffer (cmdtc->tlv_buffer);
-    cmd_tree_collect_param_tlv(libcli_get_root_hook(),  cmdtc->tlv_buffer);
-    serialize_buffer_mark_checkpoint(cmdtc->tlv_buffer);
+    cmdtc->filter_checkpoint = -1;
     cmdtc->root = libcli_get_root_hook();
     cmdtc->curr_param = libcli_get_root_hook();
+    memset (cmdtc->curr_leaf_value, 0, sizeof (cmdtc->curr_leaf_value));
     cmdtc->icursor = 0;
     cmdtc->cmdtc_state = cmdt_cur_state_init;
     while ((dequeue_glthread_first (&cmdtc->matching_params_list)));
@@ -95,7 +99,9 @@ cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
 }
 
 void 
-cmd_tree_cursor_destroy_internals (cmd_tree_cursor_t *cmdtc) {
+cmd_tree_cursor_destroy_internals (cmd_tree_cursor_t *cmdtc, bool free_tlvs) {
+
+    tlv_struct_t *tlv;
 
     if (cmdtc->params_stack) {
         reset_stack (cmdtc->params_stack);
@@ -103,11 +109,15 @@ cmd_tree_cursor_destroy_internals (cmd_tree_cursor_t *cmdtc) {
         cmdtc->params_stack = NULL;
     }
 
-    if (cmdtc->tlv_buffer) {
-        free_serialize_buffer (cmdtc->tlv_buffer);
-        cmdtc->tlv_buffer = NULL;
+    if (cmdtc->tlv_stack) {
+        while ((tlv = (tlv_struct_t *)pop(cmdtc->tlv_stack))) {
+            if (free_tlvs) free(tlv);
+        }
+        free_stack (cmdtc->tlv_stack);
+        cmdtc->tlv_stack = NULL;
     }
 
+    memset (cmdtc->curr_leaf_value, 0, sizeof (cmdtc->curr_leaf_value));
     while ((dequeue_glthread_first (&cmdtc->matching_params_list)));
 }
 
@@ -147,6 +157,8 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc) {
 
     param_t *param_top = (param_t *)StackGetTopElem (cmdtc->params_stack);
   
+  #if 0
+
     if (!cmdtc_is_serialized_buffer_empty (cmdtc->tlv_buffer)) {
 
         char *ptr = serialize_buffer_get_current_ptr (cmdtc->tlv_buffer);
@@ -182,6 +194,7 @@ cmdtc_debug_print_stats (cmd_tree_cursor_t *cmdtc) {
             tlv_top_name,
             cmdtc_get_state_str (cmdtc),
             cmdtc->is_negate ? "y" : "n");
+    #endif 
 }
 
 bool
@@ -193,36 +206,33 @@ cmdtc_get_cmd_trigger_status (cmd_tree_cursor_t *cmdtc) {
 bool 
 cmdtc_is_params_stack_empty (Stack_t *params_stack) {
 
+    assert (params_stack->top != -1);
     return ((param_t *)params_stack->slot[params_stack->top] == libcli_get_root_hook() &&
                     params_stack->top == 0);
 }
 
 bool 
-cmdtc_is_serialized_buffer_empty (ser_buff_t *tlv_buffer) {
+cmdtc_is_tlv_stack_empty (Stack_t *tlv_stack) {
 
-    return (
-                (serialize_buffer_get_checkpoint_offset (tlv_buffer) ==
-                    serialize_buffer_get_size (tlv_buffer))
-                    && 
-                (serialize_buffer_get_size (tlv_buffer) == sizeof (tlv_struct_t))
-                );
+    bool rc;
+    assert (tlv_stack->top != -1);
+    if (tlv_stack->top > 0) return false;
+    tlv_struct_t *tlv = (tlv_struct_t *)StackGetTopElem (tlv_stack);
+    rc = (strncmp ((const char *)tlv->value, 
+                GET_CMD_NAME (libcli_get_root_hook()), 
+                LEAF_VALUE_HOLDER_SIZE) == 0);
+    assert (rc);
+    return rc;
 }
-
 
 /* Fn to move the cmd tree cursor one level down the tree*/
 void 
 cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
 
     push(cmdtc->params_stack, (void *)cmdtc->curr_param);
-    cmd_tree_collect_param_tlv(cmdtc->curr_param, cmdtc->tlv_buffer);
-
-    #if 0
-    if (IS_PARAM_LEAF (cmdtc->curr_param)) {
-        memset (GET_LEAF_VALUE_PTR(cmdtc->curr_param), 0, 
-            LEAF_VALUE_HOLDER_SIZE);
-    }
-    #endif
-    
+    push (cmdtc->tlv_stack, (void *) cmd_tree_convert_param_to_tlv (
+                                cmdtc->curr_param, cmdtc->curr_leaf_value));
+    memset (cmdtc->curr_leaf_value, 0, sizeof (cmdtc->curr_leaf_value));
     cmdtc->icursor = 0;
     cmdtc->cmdtc_state = cmdt_cur_state_init;
     while (dequeue_glthread_first(&cmdtc->matching_params_list));
@@ -241,7 +251,8 @@ cmdtc_is_cursor_at_apex_root (cmd_tree_cursor_t *cmdtc) {
         assert (!isStackEmpty (cmdtc->params_stack));
         assert (cmdtc->params_stack->top == 0);
         assert (cmdtc->params_stack->slot[0] == libcli_get_root_hook());
-        assert (!serialize_buffer_get_size(cmdtc->tlv_buffer));
+        assert (!isStackEmpty (cmdtc->tlv_stack));
+        assert (cmdtc->tlv_stack->top == 0);
     }
     return rc;
 }
@@ -258,6 +269,7 @@ cmd_tree_cursor_move_one_level_up (
             bool update_root)  {
 
     int count = 0;
+    tlv_struct_t *tlv;
 
     switch (cmdtc->cmdtc_state) {
         case cmdt_cur_state_init:
@@ -272,20 +284,21 @@ cmd_tree_cursor_move_one_level_up (
             }
             
             pop(cmdtc->params_stack);
+            tlv = (tlv_struct_t *)pop(cmdtc->tlv_stack);
             
             count = (IS_PARAM_CMD (cmdtc->curr_param) || IS_PARAM_NO_CMD(cmdtc->curr_param)) ? \
                             cmdtc->curr_param->cmd_type.cmd->len : \
-                            strlen(GET_LEAF_VALUE_PTR(cmdtc->curr_param));
+                            strlen ((const char *)tlv->value);
+    
             count += 1; /* +1 is to accomo*/
+
+            free (tlv);
 
             if (IS_PARAM_NO_CMD (cmdtc->curr_param)) {
                 cmdtc->is_negate = false;
             }
 
-            if (IS_PARAM_LEAF (cmdtc->curr_param)) {
-                memset (GET_LEAF_VALUE_PTR(cmdtc->curr_param), 0, LEAF_VALUE_HOLDER_SIZE);
-            }
-
+            memset (cmdtc->curr_leaf_value, 0, sizeof (cmdtc->curr_leaf_value));
             cmdtc->curr_param =  (param_t *)StackGetTopElem(cmdtc->params_stack);
             
             /* This fn is called for PAGE_UP and BACKSPACE. We need to update root
@@ -297,21 +310,10 @@ cmd_tree_cursor_move_one_level_up (
                     cmd_tree_install_universal_params (cmdtc->root, cmdtc_get_branch_hook (cmdtc));
                 }
             }
-
-           /* Lower down the checkpoint of the serialized buffer. */
-            if (serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer) == 
-                    serialize_buffer_get_size (cmdtc->tlv_buffer)) {
-        
-                serialize_buffer_skip (cmdtc->tlv_buffer, -1 * sizeof (tlv_struct_t));
-                serialize_buffer_mark_checkpoint(cmdtc->tlv_buffer);
-            }
-            else {
-                serialize_buffer_skip (cmdtc->tlv_buffer, -1 * sizeof (tlv_struct_t));
-            }
         break;
         case cmdt_cur_state_multiple_matches:
             if (cmdtc->leaf_param) {
-                memset (GET_LEAF_VALUE_PTR(cmdtc->leaf_param), 0, cmdtc->icursor);
+                memset (cmdtc->curr_leaf_value, 0, cmdtc->icursor);
                 cmdtc->leaf_param = NULL;
             }
             while (dequeue_glthread_first(&cmdtc->matching_params_list));
@@ -327,7 +329,7 @@ cmd_tree_cursor_move_one_level_up (
         case cmdt_cur_state_single_word_match: 
         case cmdt_cur_state_matching_leaf:
             if (cmdtc->leaf_param) {
-                memset (GET_LEAF_VALUE_PTR(cmdtc->leaf_param), 0, cmdtc->icursor);
+                memset (cmdtc->curr_leaf_value, 0, cmdtc->icursor);
                 cmdtc->leaf_param = NULL;
             }
             while (dequeue_glthread_first(&cmdtc->matching_params_list));
@@ -670,9 +672,13 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
         case cmdt_cur_state_matching_leaf:
 
             /* Standard Validation Checks on Leaf */
-            if (clistd_validate_leaf (cmdtc->curr_param) != LEAF_VALIDATION_SUCCESS) {
+            tlv_struct_t *tlv;
+            tlv = cmd_tree_convert_param_to_tlv (cmdtc->curr_param, cmdtc->curr_leaf_value);
+            if (clistd_validate_leaf (tlv) != LEAF_VALIDATION_SUCCESS) {
+                free(tlv);
                 return cmdt_cursor_no_match_further;
             }
+            free(tlv);
 
              /* User has typed ' ' while inputting the value of leaf. Go to next level*/
             cmd_tree_cursor_move_to_next_level (cmdtc);
@@ -725,7 +731,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                     /* No Action*/
                 }
                 else if (cmdtc->leaf_param){
-                    cmd_tree_leaf_char_save (cmdtc->curr_param, c, cmdtc->icursor);
+                    cmd_tree_leaf_char_save (cmdtc->curr_leaf_value, c, cmdtc->icursor);
                 }
                 cmdtc->icursor++;
                 assert(cmdtc->icursor == 1);
@@ -737,7 +743,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                 /* if more than 1 child params are matching*/
                 cmdtc->cmdtc_state = cmdt_cur_state_multiple_matches;
                 if (cmdtc->leaf_param) {
-                     cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+                     cmd_tree_leaf_char_save (cmdtc->curr_leaf_value, c, cmdtc->icursor);
                 }
                 cmdtc->icursor++;
                 assert(cmdtc->icursor == 1);
@@ -750,7 +756,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                 if (cmdtc->leaf_param) {
                     cmdtc->curr_param = cmdtc->leaf_param;
                     cmdtc->cmdtc_state =  cmdt_cur_state_matching_leaf;
-                    cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+                    cmd_tree_leaf_char_save (cmdtc->curr_leaf_value, c, cmdtc->icursor);
                     cmdtc->icursor++;
                     return cmdt_cursor_ok;
                 }
@@ -777,7 +783,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                 }
                 else if (cmdtc->leaf_param){
 
-                    cmd_tree_leaf_char_save (cmdtc->curr_param, c, cmdtc->icursor);
+                    cmd_tree_leaf_char_save (cmdtc->curr_leaf_value, c, cmdtc->icursor);
                 }
                 cmdtc->icursor++;
                 return cmdt_cursor_ok;
@@ -787,7 +793,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
 
                 /* if more than 1 child params are matching*/
                 if (cmdtc->leaf_param) {
-                     cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+                     cmd_tree_leaf_char_save (cmdtc->curr_leaf_value, c, cmdtc->icursor);
                 }
                 cmdtc->icursor++;
                 return cmdt_cursor_ok;
@@ -799,7 +805,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                 if (cmdtc->leaf_param) {
                     cmdtc->curr_param = cmdtc->leaf_param;
                     cmdtc->cmdtc_state =  cmdt_cur_state_matching_leaf;
-                    cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+                    cmd_tree_leaf_char_save (cmdtc->curr_leaf_value, c, cmdtc->icursor);
                     cmdtc->icursor++;
                     return cmdt_cursor_ok;
                 }
@@ -817,7 +823,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
             if (mcount == 1) {
 
                 if (cmdtc->leaf_param) {
-                     cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+                     cmd_tree_leaf_char_save (cmdtc->curr_leaf_value, c, cmdtc->icursor);
                 }
 
                 cmdtc->icursor++;
@@ -834,7 +840,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                 if (cmdtc->leaf_param) {
                     cmdtc->curr_param = cmdtc->leaf_param;
                     cmdtc->cmdtc_state =  cmdt_cur_state_matching_leaf;
-                    cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+                    cmd_tree_leaf_char_save (cmdtc->curr_leaf_value, c, cmdtc->icursor);
                     cmdtc->icursor++;
                     return cmdt_cursor_ok;
                 }
@@ -848,7 +854,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
         assert(cmdtc->leaf_param &&
                   cmdtc->curr_param && 
                   (cmdtc->leaf_param == cmdtc->curr_param));
-        cmd_tree_leaf_char_save (cmdtc->leaf_param, c, cmdtc->icursor);
+        cmd_tree_leaf_char_save (cmdtc->curr_leaf_value, c, cmdtc->icursor);
         cmdtc->icursor++;
         return cmdt_cursor_ok;
         break;
@@ -879,6 +885,12 @@ Stack_t *
 cmdtc_get_params_stack (cmd_tree_cursor_t *cmdtc) {
     
     return cmdtc->params_stack;
+}
+
+Stack_t *
+cmdtc_get_tlv_stack (cmd_tree_cursor_t *cmdtc) {
+    
+    return cmdtc->tlv_stack;
 }
 
 param_t *
@@ -919,6 +931,13 @@ cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc) {
     while (dequeue_glthread_first(&cmdtc->matching_params_list)) ;
 }
 
+typedef struct tlv_container_ {
+
+    tlv_struct_t *tlv;
+    glthread_t glue;
+} tlv_container_t;
+GLTHREAD_TO_STRUCT (glue_to_tlv_container, tlv_container_t, glue);
+
 void 
 cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
 
@@ -926,10 +945,13 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     glthread_t *curr;
     param_t *param;
     glthread_t temp_list;
-    
+    tlv_container_t *tlvc;
+    glthread_t tlv_temp_list;
+
     int byte_count = 0;
 
     init_glthread (&temp_list);
+    init_glthread (&tlv_temp_list);
 
     cli = cli_get_default_cli();
 
@@ -962,6 +984,11 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
                 param = (param_t *)pop(cmdtc->params_stack);
                 assert(!IS_QUEUED_UP_IN_THREAD(&param->glue));
                 glthread_add_next(&temp_list, &param->glue);
+
+                tlvc = (tlv_container_t *)calloc (1, sizeof (tlv_container_t));
+                init_glthread (&tlvc->glue);
+                tlvc->tlv = (tlv_struct_t *)pop (cmdtc->tlv_stack);
+                glthread_add_next(&tlv_temp_list, &tlvc->glue);
         }
 
         /* Remove the universal tags from outer command's checkpointed param*/
@@ -970,20 +997,24 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
         while (!cmdtc_is_params_stack_empty (cmdtc->params_stack)) {
             pop(cmdtc->params_stack);
         }
-
-        /* Lets obey our design and rebuild the serialize buffer so that tlv buffer comply with
-            the params_stack*/
-        reset_serialize_buffer (cmdtc->tlv_buffer);
+        while (!cmdtc_is_tlv_stack_empty (cmdtc->tlv_stack)) {
+            free(pop(cmdtc->tlv_stack));
+        }
 
         while ((curr = dequeue_glthread_first(&temp_list))) {
 
-            param = glue_to_param(curr);
+            param = (param_t *)glue_to_param(curr);
             push(cmdtc->params_stack, (void *)param);
-            cmd_tree_collect_param_tlv (param, cmdtc->tlv_buffer);
+        }
+
+        while ((curr = dequeue_glthread_first(&tlv_temp_list))) {
+
+            tlvc = (tlv_container_t *)glue_to_tlv_container(curr);
+            push(cmdtc->tlv_stack, (void *)tlvc->tlv);
+            free(tlvc);
         }
         
         cmdtc->stack_checkpoint = cmdtc->params_stack->top;
-        serialize_buffer_mark_checkpoint (cmdtc->tlv_buffer);
         cmdtc->root = libcli_get_root_hook ();
         cmdtc->curr_param = (param_t *)StackGetTopElem(cmdtc->params_stack);
     }
@@ -998,30 +1029,30 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
         glthread_add_next (&temp_list, &param->glue);
     }
 
+    while (!cmdtc_is_tlv_stack_empty(cmdtc->tlv_stack)) {
+        tlvc = (tlv_container_t *)calloc(1, sizeof(tlv_container_t));
+        init_glthread(&tlvc->glue);
+        tlvc->tlv = (tlv_struct_t *)pop(cmdtc->tlv_stack);
+        glthread_add_next(&tlv_temp_list, &tlvc->glue);
+    }
+
     /* Now prepare the new CLI hdr which is DEF HDR + 
         path from root to current level in cmd-tree*/
     cli_complete_reset (cli);
     unsigned char *buffer = cli_get_cli_buffer (cli, NULL);
-    
+
     byte_count += snprintf ((char *)buffer + byte_count, 
                             MAX_COMMAND_LENGTH, "%s", DEF_CLI_HDR);
 
-    ITERATE_GLTHREAD_BEGIN(&temp_list, curr) {
+    ITERATE_GLTHREAD_BEGIN(&tlv_temp_list, curr) {
 
-        param = glue_to_param (curr);
+        tlvc = (tlv_container_t *)glue_to_tlv_container (curr);
 
-        if (IS_PARAM_CMD (param) || IS_PARAM_NO_CMD(param)) {
-
-            byte_count += snprintf ((char *)buffer + byte_count, 
-                            MAX_COMMAND_LENGTH - byte_count, "%s-", GET_CMD_NAME(param));
-        }
-        else {
-            
-            byte_count += snprintf ((char *)buffer + byte_count, 
-                            MAX_COMMAND_LENGTH - byte_count, "%s-", GET_LEAF_VALUE_PTR(param));
-
-        }
-    }ITERATE_GLTHREAD_END(&temp_list, curr) 
+        byte_count += snprintf ((char *)buffer + byte_count, 
+                            MAX_COMMAND_LENGTH - byte_count, "%s-", 
+                            (const char *)tlvc->tlv->value);
+        
+    }ITERATE_GLTHREAD_END(&tlv_temp_list, curr) 
 
     /* Adjust the prompt characters */
     buffer[byte_count - 1] = '>';
@@ -1030,16 +1061,19 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
 
     cli_set_hdr (cli, NULL, byte_count);
 
-    /*Since we are about to rebuild the params_stack, rebuild the serialize buffer as
-        params_stack and tlv buffer go hand-in-hand. Hence, drained the older tlv buffer*/
-    reset_serialize_buffer (cmdtc->tlv_buffer);
     /* Rebuild  the params_stack again, thanks you params_stack !*/
     while ((curr = dequeue_glthread_first (&temp_list))) {
 
          param = glue_to_param (curr);
          push (cmdtc->params_stack , (void *)param);
-         cmd_tree_collect_param_tlv (param, cmdtc->tlv_buffer);
     }
+
+    while ((curr = dequeue_glthread_first (&tlv_temp_list))) {
+
+         tlvc = (tlv_container_t *)glue_to_tlv_container(curr);
+         push(cmdtc->tlv_stack, (void *)tlvc->tlv);
+         free(tlvc);
+    }    
 
     if (cmdtc->root != libcli_get_root_hook()) {
         cmd_tree_uninstall_universal_params (cmdtc->root);
@@ -1047,7 +1081,6 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     /* Save the context of where we are now in CLI tree by updating the root,
         and checkpoint the params_stack and TLV buffer  */
     cmdtc->root = cmdtc->curr_param;
-    serialize_buffer_mark_checkpoint (cmdtc->tlv_buffer);
     cmdtc->stack_checkpoint = cmdtc->params_stack->top;
 
     cmd_tree_install_universal_params (cmdtc->root, cmdtc_get_branch_hook(cmdtc));
@@ -1068,19 +1101,13 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
     while (cmdtc->params_stack->top > cmdtc->stack_checkpoint) {
 
         param = (param_t *)pop(cmdtc->params_stack);
-
-        if (IS_PARAM_LEAF(param)) {
-            memset (GET_LEAF_VALUE_PTR(param), 0, LEAF_VALUE_HOLDER_SIZE);
-        }
+        free (pop(cmdtc->tlv_stack));
 
         if (IS_PARAM_NO_CMD(param)) {
             assert (cmdtc->is_negate);
             cmdtc->is_negate = false;
         }
     }
-
-    /* Restore the serialized buffer to the checkpoint state */
-    serialize_buffer_restore_checkpoint(cmdtc->tlv_buffer);
 
     /* Set back the curr_param to start of the root of the tree. Root of the
         tree could be actual 'root' param, or some other param in tree if
@@ -1149,7 +1176,6 @@ static void
 cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
 
     int i;
-    int count = 1;
     param_t *param;
     cmd_tree_cursor_t *cmdtc;
     op_mode enable_or_diable;
@@ -1166,7 +1192,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         for (i = cli_cmdtc->stack_checkpoint + 1 ; i <= cli_cmdtc->params_stack->top; i++) {
             param = (param_t *) cli_cmdtc->params_stack->slot[i];
             push (cmdtc->params_stack, (void *)param);
-            cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
+            push (cmdtc->tlv_stack, (void *)cli_cmdtc->tlv_stack->slot[i]);
         }
         cmdtc->curr_param = (param_t *) StackGetTopElem (cmdtc->params_stack);
     }
@@ -1180,14 +1206,11 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         attron(COLOR_PAIR(RED_ON_BLACK));
         printw("\nError : Incomplete CLI...");
         attroff(COLOR_PAIR(RED_ON_BLACK));
-        if (temp_cmdtc) {cmd_tree_cursor_destroy_internals (cmdtc); free(cmdtc); }
+        if (temp_cmdtc) {cmd_tree_cursor_destroy_internals (cmdtc, false); free(cmdtc); }
         return;
     }
 
     cli_cmdtc->success = true;
-
-    int tlv_buffer_original_size = serialize_buffer_get_size (cmdtc->tlv_buffer);
-    int tlv_buffer_checkpoint_offset = serialize_buffer_get_checkpoint_offset (cmdtc->tlv_buffer);
 
     if (cmdtc_get_branch_hook (cmdtc) == libcli_get_config_hook()) {
        
@@ -1207,11 +1230,11 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
 
         param = (param_t *)StackGetTopElem(cmdtc->params_stack);
 
-        if (param->callback (param, cmdtc->tlv_buffer, enable_or_diable)) {
+        if (param->callback (param, cmdtc->tlv_stack, enable_or_diable)) {
             cli_cmdtc->success = false;
         }
 
-        if (temp_cmdtc) {cmd_tree_cursor_destroy_internals (cmdtc); free(cmdtc); }
+        if (temp_cmdtc) {cmd_tree_cursor_destroy_internals (cmdtc, false); free(cmdtc); }
         return;
     }
 
@@ -1222,20 +1245,19 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         param = (param_t *)cmdtc->params_stack->slot[i];
 
         if (!param->callback)  {
-            count++;
             continue;
         }
         /* Temporarily over-write the size of TLV buffer */
-        cmdtc->tlv_buffer->next = tlv_buffer_checkpoint_offset + (sizeof (tlv_struct_t) * count);
-        count++;
-        if (param->callback (param, cmdtc->tlv_buffer, enable_or_diable)) {
+
+        cmdtc->tlv_stack->top = i;
+
+        if (param->callback (param, cmdtc->tlv_stack, enable_or_diable)) {
             cli_cmdtc->success = false;
             break;
         }
     }
-    cmdtc->tlv_buffer->next = tlv_buffer_original_size;
-
-    if (temp_cmdtc) { cmd_tree_cursor_destroy_internals (cmdtc); free(cmdtc); }
+    cmdtc->tlv_stack->top = cmdtc->params_stack->top;
+    if (temp_cmdtc) { cmd_tree_cursor_destroy_internals (cmdtc, false); free(cmdtc); }
 }
 
 /* Fn to process user CLI when he press ENTER key while working in 
@@ -1277,17 +1299,21 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
             return;
         case cmdt_cur_state_matching_leaf:
             /* Standard Validation Checks on Leaf */
-            if (clistd_validate_leaf (cmdtc->curr_param) != LEAF_VALIDATION_SUCCESS) {
+            tlv_struct_t *tlv;
+            tlv = cmd_tree_convert_param_to_tlv (cmdtc->curr_param, cmdtc->curr_leaf_value);
+
+            if (clistd_validate_leaf (tlv) != LEAF_VALIDATION_SUCCESS) {
 
                 attron(COLOR_PAIR(RED_ON_BLACK));
                 printw ("\nError : value %s do not comply with expected data type : %s", 
-                    GET_LEAF_VALUE_PTR (cmdtc->curr_param),
+                    tlv->value,
                     GET_LEAF_TYPE_STR(cmdtc->curr_param));
                 attroff(COLOR_PAIR(RED_ON_BLACK));
-                memset (GET_LEAF_VALUE_PTR(cmdtc->curr_param), 0, LEAF_VALUE_HOLDER_SIZE);
                 cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
+                free(tlv);
                 return;
-            }            
+            }       
+            free(tlv);
             /* Push it into the params_stack and Fire the CLI*/
             cmd_tree_cursor_move_to_next_level (cmdtc);
             cmd_tree_trigger_cli (cmdtc);
@@ -1312,7 +1338,6 @@ cmdtc_parse_full_command (cli_t *cli) {
     int i;
     int cmd_size;
     int token_cnt;
-    tlv_struct_t tlv;
     param_t *param;
     bool is_new_cmdtc;
     char** tokens = NULL;
@@ -1339,15 +1364,16 @@ cmdtc_parse_full_command (cli_t *cli) {
 
     /* Now Three Cases arises. Lets cover one by one and use cmdtc accordingly. */
 
-
-    /* Case 1 : If we have picked up the CLI from history, then take a new temp cursor.  We only need to use its params_stack and TLV buffer */
+    /* Case 1 : If we have picked up the CLI from history, then take a new temp cursor. 
+    We only need to use its params_stack and TLV buffer */
     if (cli_is_historical (cli)) {
         cmd_tree_cursor_init (&cmdtc);
         is_new_cmdtc = true;
     }
     
     /*Case 2 :  If in mode (line mode also), user has typed out the command starting from hook 
-    ( first token is a hook), then also take a new cmdtc because we dont need existing params_stack and TLV buffer*/
+    ( first token is a hook), then also take a new cmdtc because we dont need existing 
+    params_stack and TLV buffer*/
     else if (cmd_tree_is_token_a_hook (*(tokens+ 0))) {
         cmd_tree_cursor_init (&cmdtc);
         is_new_cmdtc = true;
@@ -1378,68 +1404,72 @@ cmdtc_parse_full_command (cli_t *cli) {
             attroff(COLOR_PAIR(RED_ON_BLACK));
             cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
             if (is_new_cmdtc) {
-                cmd_tree_cursor_destroy_internals (cmdtc);
+                cmd_tree_cursor_destroy_internals (cmdtc, true);
                 free(cmdtc);
             }
             return false;
         }
 
-        memset(&tlv, 0, sizeof(tlv_struct_t));
-
         if (IS_PARAM_LEAF(param)) {
 
             /* Temporarily store leaf value in param, as in line-mode we dont really store CLI
                 values in CmdTree params*/
-            strncpy (GET_LEAF_VALUE_PTR (param), *(tokens + i), strlen (*(tokens + i)));
+            tlv_struct_t *tlvptr =  cmd_tree_convert_param_to_tlv (param, (unsigned char *)*(tokens + i));
 
-            if (clistd_validate_leaf (param) != LEAF_VALIDATION_SUCCESS) {
+            if (clistd_validate_leaf (tlvptr) != LEAF_VALIDATION_SUCCESS) {
 
-                memset (GET_LEAF_VALUE_PTR (param), 0, LEAF_VALUE_HOLDER_SIZE);
                 attron(COLOR_PAIR(RED_ON_BLACK));
                 printw ("\nError : value %s do not comply with expected data type : %s", 
                     *(tokens + i),
                     GET_LEAF_TYPE_STR(param));
                 attroff(COLOR_PAIR(RED_ON_BLACK));
-                cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
+
+                
+
                 if (is_new_cmdtc) {
-                    cmd_tree_cursor_destroy_internals(cmdtc);
+                    cmd_tree_cursor_destroy_internals(cmdtc, true);
                     free(cmdtc);
                 }
+                else {
+                    cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
+                }
+
+                free(tlvptr);
                 return false;
             } 
-
-            memset (GET_LEAF_VALUE_PTR (param), 0, LEAF_VALUE_HOLDER_SIZE);
+            free(tlvptr);
 
             if (param->cmd_type.leaf->user_validation_cb_fn &&
                 (param->cmd_type.leaf->user_validation_cb_fn(
-                    cmdtc->tlv_buffer, (unsigned char *)*(tokens + i)) == LEAF_VALIDATION_FAILED)) {
+                    cmdtc->tlv_stack, (unsigned char *)*(tokens + i)) == LEAF_VALIDATION_FAILED)) {
                 
                 attron(COLOR_PAIR(RED_ON_BLACK));
                 printw ("\nCLI Error : User Validation Failed for value : %s", *(tokens + i));
                 attroff(COLOR_PAIR(RED_ON_BLACK));
-                cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
+                
                 if (is_new_cmdtc) {
-                    cmd_tree_cursor_destroy_internals (cmdtc);
+                    cmd_tree_cursor_destroy_internals (cmdtc, true);
                     free(cmdtc);
+                }
+                else {
+                    cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
                 }
                 return false;
             }
 
-            prepare_tlv_from_leaf(GET_PARAM_LEAF(param), (&tlv));
-            put_value_in_tlv((&tlv), *(tokens +i));
-            strncpy (GET_LEAF_VALUE_PTR (param), *(tokens +i), strlen (*(tokens +i)));
-            collect_tlv(cmdtc->tlv_buffer, &tlv);
             push(cmdtc->params_stack, (void *)param);
+            push (cmdtc->tlv_stack, (void *)cmd_tree_convert_param_to_tlv (
+                                        param, (unsigned char *)*(tokens +i)));
         }
         else if (IS_PARAM_CMD(param)){
-            cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
             push(cmdtc->params_stack, (void *)param);
+            push (cmdtc->tlv_stack, (void *)cmd_tree_convert_param_to_tlv (param, NULL));
         }
         else if (IS_PARAM_NO_CMD (param)) {
             if (!cmdtc->is_negate) {
                 cmdtc->is_negate = true;
-                cmd_tree_collect_param_tlv(param, cmdtc->tlv_buffer);
                 push(cmdtc->params_stack, (void *)param);
+                push (cmdtc->tlv_stack, (void *)cmd_tree_convert_param_to_tlv (param, NULL));
             }
             else {
                 /* Negation appearing more than once in the command, ignore the subsequent
@@ -1453,15 +1483,16 @@ cmdtc_parse_full_command (cli_t *cli) {
     cmd_tree_trigger_cli (cmdtc);
 
     if (cmdtc->success) { 
-
         cmd_tree_post_cli_trigger (cli);   
     }
 
-    cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
-
     if (is_new_cmdtc) {
-        cmd_tree_cursor_destroy_internals (cmdtc);
+        cmd_tree_cursor_destroy_internals (cmdtc, true);
         free(cmdtc);
     }
+    else {
+        cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
+    }
+    
     return true;
 }

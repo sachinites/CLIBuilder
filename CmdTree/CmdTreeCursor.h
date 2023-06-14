@@ -31,7 +31,7 @@ cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc,
                                                                 bool honor_checkpoint, bool update_root) ;
 
 void 
-cmd_tree_cursor_destroy_internals (cmd_tree_cursor_t *cmdtc);
+cmd_tree_cursor_destroy_internals (cmd_tree_cursor_t *cmdtc, bool free_tlvs);
 
 void 
 cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc);
@@ -60,6 +60,9 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) ;
 Stack_t *
 cmdtc_get_params_stack (cmd_tree_cursor_t *cmdtc);
 
+Stack_t *
+cmdtc_get_tlv_stack (cmd_tree_cursor_t *cmdtc);
+
 param_t *
 cmdtc_get_root (cmd_tree_cursor_t *cmdtc);
 
@@ -82,7 +85,7 @@ bool
 cmdtc_is_params_stack_empty (Stack_t *stack);
 
 bool 
-cmdtc_is_serialized_buffer_empty (ser_buff_t *tlv_buffer);
+cmdtc_is_tlv_stack_empty (Stack_t *tlv_stack) ;
 
 param_t *
 cmdtc_get_branch_hook (cmd_tree_cursor_t *cmdtc);
