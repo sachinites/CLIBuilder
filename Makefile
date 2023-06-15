@@ -10,7 +10,8 @@ OBJ=KeyProcessor/KeyProcessor.o \
 		 CmdTree/clistd.o \
 		 CmdTree/CmdTreeCursor.o \
 		 gluethread/glthread.o \
-		 # printf_hijack.o \
+		 Filters/filters.o \
+		 utinfra/ut_parser.o \
 		 
 KeyProcessor/KeyProcessor.o:KeyProcessor/KeyProcessor.cpp
 	@echo "Building KeyProcessor/KeyProcessor.o"
@@ -40,6 +41,14 @@ CmdTree/CmdTree.o:CmdTree/CmdTree.cpp
 	@echo "Building CmdTree/CmdTree.o"
 	@ ${CC} ${CFLAGS} -c ${INCLUDES} CmdTree/CmdTree.cpp -o CmdTree/CmdTree.o
 
+Filters/filters.o:Filters/filters.cpp
+	@echo "Building Filters/filters.o"
+	@ ${CC} ${CFLAGS} -c ${INCLUDES} Filters/filters.cpp -o Filters/filters.o
+
+utinfra/ut_parser.o:utinfra/ut_parser.cpp
+	@echo "Building utinfra/ut_parser.o"
+	@ ${CC} ${CFLAGS} -c ${INCLUDES} utinfra/ut_parser.cpp -o utinfra/ut_parser.o
+
 testapp.o:testapp.c
 	@echo "Building testapp.o"
 	@ ${CC} ${CFLAGS} -c ${INCLUDES} testapp.c -o testapp.o
@@ -60,6 +69,8 @@ clean:
 	rm -f KeyProcessor/*.o
 	rm -f stack/*.o 
 	rm -f gluethread/*.o 
+	rm -f Filters/*.o
+	rm -f utinfra/*.o
 	rm -f ${CLILIB}
 install:
 	cp ${CLILIB} /usr/local/lib/

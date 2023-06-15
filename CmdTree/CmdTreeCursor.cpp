@@ -1,3 +1,24 @@
+/*
+ * =====================================================================================
+ *
+ *       Filename:  CmTreeCursor.cpp
+ *
+ *    Description:  This file Implements Cursor Operations on CmdTree
+ *
+ *        Version:  1.0
+ *        Created:  Thursday 15 June 2023 05:37:07  IST
+ *       Revision:  1.0
+ *       Compiler:  gcc/g++
+ *
+ *         Author:  Er. Abhishek Sagar, Networking Developer (AS), sachinites@gmail.com
+ *        Company:  Brocade Communications(2012-2016)
+ *                          Juniper Networks(2017-2021)
+ *                          Cisco Systems(2021-2023)
+ *                          CALIX(2023-Present)
+ *
+ * =====================================================================================
+ */
+
 #include <assert.h>
 #include <stdlib.h>
 #include <ncurses.h>
@@ -11,6 +32,9 @@
 
 extern void
 cli_process_key_interrupt(int ch);
+
+extern void  SetFilterContext (tlv_struct_t **lfilter_array, int lsize) ;
+extern void UnsetFilterContext () ;
 
 typedef enum cmdt_cursor_state_ {
 
@@ -469,6 +493,9 @@ cmdtc_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, bo
 
             child_param = cmdtc->curr_param->options[i];
             if (!child_param) continue;
+
+            if (child_param->flags & PARAM_F_DISABLE_PARAM) continue;
+
             if (IS_PARAM_NO_CMD(child_param) &&
                     cmdtc->is_negate) continue;
 
@@ -976,7 +1003,7 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     if (!cli_is_char_mode_on()) return;
 
     /* Allow Mode when we are either in init state Or 
-        in multiple match state but with i_cursor index as 0 which
+        in multiple match state but with i_cursor index as 0initde_init which
         means, user has multiple options to choose from, but not yet
         typed a single character yet*/
     if ( ! ((cmdtc->cmdtc_state == cmdt_cur_state_init) ||
@@ -1127,6 +1154,10 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
         }
     }
 
+    if (cmdtc->params_stack->top < cmdtc->filter_checkpoint) {
+        cmdtc->filter_checkpoint = -1;
+    }
+
     /* Set back the curr_param to start of the root of the tree. Root of the
         tree could be actual 'root' param, or some other param in tree if
         user is operating in mode */
@@ -1204,6 +1235,15 @@ cmdtc_get_last_cbk_param (cmd_tree_cursor_t *cmdtc) {
    return (param_t *)StackGetTopElem(cmdtc->params_stack);
 }
 
+static void
+cmdtc_set_filter_context (cmd_tree_cursor_t *cmdtc) {
+
+    /* only show commands have filter checkpoints*/
+    if (cmdtc->filter_checkpoint == -1) return;
+    SetFilterContext ((tlv_struct_t **)&cmdtc->tlv_stack->slot[cmdtc->filter_checkpoint],
+                                  cmdtc->tlv_stack->top - cmdtc->filter_checkpoint + 1);
+}
+
 /* This function eventually submit the CLI to the backend application */
 static void 
 cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
@@ -1268,9 +1308,13 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
     if (enable_or_diable == OPERATIONAL ||
             enable_or_diable == CONFIG_DISABLE) {
 
+        cmdtc_set_filter_context (cmdtc);
+        
         if (param->callback (param, cmdtc->tlv_stack, enable_or_diable)) {
             cli_cmdtc->success = false;
         }
+
+        UnsetFilterContext ();
 
         if (temp_cmdtc) {cmd_tree_cursor_destroy_internals (cmdtc, false); free(cmdtc); }
         return;
@@ -1383,7 +1427,10 @@ cmdtc_parse_full_command (cli_t *cli) {
 
     cli_sanity_check (cli);
     is_new_cmdtc = false;
-    assert (!cli_is_char_mode_on ());
+
+    /* This fn is used by TC infra which will submit the cmds in char mode
+        only. Hence remove this assert*/
+    //assert (!cli_is_char_mode_on ());
 
     re_init_tokens(MAX_CMD_TREE_DEPTH);
 
@@ -1538,4 +1585,22 @@ cmdtc_parse_full_command (cli_t *cli) {
     }
     
     return true;
+}
+
+bool
+cmdtc_parse_raw_command (unsigned char *command, int cmd_size) {
+
+    bool rc;
+    cmd_tree_cursor_t *cmdtc;
+    cli_t *cli = cli_malloc ();
+    cli_set_hdr (cli, (unsigned char *)DEF_CLI_HDR, (uint8_t) strlen (DEF_CLI_HDR));
+    cmd_tree_cursor_init (&cmdtc);
+    cli_set_cmd_tree_cursor (cli, cmdtc);
+    cli_append_user_command (cli, command, cmd_size);
+    cmdtc_parse_full_command (cli);
+    rc = cmdtc->success;
+    cmd_tree_cursor_destroy_internals (cmdtc, true);
+    free (cmdtc);
+    free (cli);
+    return rc;
 }

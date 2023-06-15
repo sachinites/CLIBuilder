@@ -90,4 +90,7 @@ cmdtc_is_tlv_stack_empty (Stack_t *tlv_stack) ;
 param_t *
 cmdtc_get_branch_hook (cmd_tree_cursor_t *cmdtc);
 
+bool
+cmdtc_parse_raw_command (unsigned char *command, int cmd_size) ;
+
 #endif 

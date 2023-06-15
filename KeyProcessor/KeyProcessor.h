@@ -21,6 +21,8 @@ cli_is_char_mode_on () ;
 
 cli_t * cli_get_default_cli () ;
 
+cli_t *cli_malloc ();
+
 void cli_set_default_cli (cli_t *cli) ;
 
 void cli_set_hdr (cli_t *cli, unsigned char *new_hdr, uint8_t size);
@@ -29,7 +31,9 @@ unsigned char *cli_get_cli_buffer (cli_t *cli, int *size);
 
 unsigned char *cli_get_user_command (cli_t *cli, int *size);
 
-cmd_tree_cursor_t * cli_get_cmdtc (cli_t *cli) ;
+int cli_append_user_command (cli_t *cli, unsigned char *cmd, int size) ;
+
+void cli_set_cmd_tree_cursor (cli_t *cli, cmd_tree_cursor_t *cmdtc) ;
 
 bool
 cli_cursor_is_at_end_of_line (cli_t *cli);

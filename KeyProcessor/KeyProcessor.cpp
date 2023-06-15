@@ -163,6 +163,13 @@ cli_get_cmd_tree_cursor (cli_t *cli)  {
 }
 
 void 
+cli_set_cmd_tree_cursor (cli_t *cli, cmd_tree_cursor_t *cmdtc)  {
+
+    assert (!cli->cmdtc);
+    cli->cmdtc = cmdtc;
+}
+
+void 
 cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
 
     if (cli_is_buffer_empty (new_cli)) return;
@@ -197,6 +204,14 @@ cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
     cli_history->count++;
 }
 
+cli_t *
+cli_malloc () {
+
+    return (cli_t *)calloc (1, sizeof (cli_t));
+}
+
+extern void ut_parser_init ( ) ;
+
 void
 libcli_init () {
 
@@ -222,6 +237,8 @@ libcli_init () {
     init_pair(PLAYER_PAIR, COLOR_RED, COLOR_MAGENTA);
     init_pair(RED_ON_BLACK, COLOR_RED, COLOR_BLACK);
     init_pair(GREEN_ON_BLACK, COLOR_GREEN, COLOR_BLACK);
+
+    ut_parser_init ( ) ;
 }
 
 void
@@ -263,10 +280,15 @@ cli_get_user_command (cli_t *cli, int *size) {
     return cmd;
 }
 
-cmd_tree_cursor_t * 
-cli_get_cmdtc (cli_t *cli) {
+int
+cli_append_user_command (cli_t *cli, unsigned char *cmd, int size) {
 
-    return cli->cmdtc;
+    unsigned char *cmd1 = &cli->clibuff[cli->end_pos];
+    memcpy (cmd1, cmd, size);
+    cli->cnt += size;
+    cli->end_pos += size;
+    cli->current_pos = cli->end_pos;
+    return cli->cnt;
 }
 
 void cli_printsc (cli_t *cli, bool next_line) {

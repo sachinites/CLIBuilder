@@ -11,6 +11,11 @@
 #include "clistd.h"
 #include "../cmdtlv.h"
 
+extern int
+ut_test_handler (param_t *param, 
+                            Stack_t *tlv_stack,
+                            op_mode enable_or_disable) ;
+
 /*Default zero level commands hooks. */
 static param_t root;
 static param_t show;
@@ -184,6 +189,40 @@ static void
         init_param (&history, CMD, "history", show_history_handler, NULL, INVALID, NULL, "CLI history");
         libcli_register_param(hook, &history);
         libcli_set_param_cmd_code(&history, SHOW_CLI_HISTORY);        
+    }
+
+    hook = libcli_get_run_hook();
+
+    {   
+        /* run ut <file path> <tc no> */
+        static param_t ut; 
+        init_param(&ut, CMD, "ut", 0, 0, INVALID, 0, "Unit Test");
+        libcli_register_param(hook, &ut);
+        {   
+            static param_t ut_file_path;
+            init_param(&ut_file_path, LEAF, 0, 0, 0, STRING, "ut-file-name", "UT file name");
+            libcli_register_param(&ut, &ut_file_path);
+            {   
+                static param_t tc_no;
+                init_param(&tc_no, LEAF, 0, ut_test_handler, 0, INT, "tc-no", "Test Case Number");
+                libcli_register_param(&ut_file_path, &tc_no);
+                libcli_set_param_cmd_code(&tc_no, CMDCODE_RUN_UT_TC);
+            }   
+        }   
+    }
+
+    hook = libcli_get_debug_hook();
+
+    {
+        static param_t ut;
+        init_param(&ut, CMD, "ut", 0, 0, INVALID, 0, "debug ut");
+        libcli_register_param(&debug, &ut);
+        {
+            static param_t enable;
+            init_param(&enable, LEAF, 0, ut_test_handler, NULL,  STRING, "ut-enable", "enable | disable");
+            libcli_register_param(&ut, &enable);
+            libcli_set_param_cmd_code(&enable, CMDCODE_DEBUG_UT);
+        }
     }
  }
 

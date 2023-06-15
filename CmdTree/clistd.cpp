@@ -162,21 +162,21 @@ int
 show_help_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
 
     attron(COLOR_PAIR(GREEN_ON_BLACK));
-    printw("\nWelcome to Help Wizard\n");
-    printw("========================\n");
-    printw("1. Use %c Character after the command to enter command mode\n", MODE_CHARACTER);
-    printw("2. Use %c Character after the command to see possible follow up suboptions\n", SUBOPTIONS_CHARACTER);
-    printw("3. Use %c Character after the command to see possible complete command completions\n", CMD_EXPANSION_CHARACTER);
-    printw("4. [ ctrl + l ] - clear screen\n");
-    printw("5. [ ctrl + t ] - jump to top of cmd tree\n");
-    printw("6. [ BackSpace ] - Erase the last word\n");
-    printw("7. [ Page Up  Or  ctrl + ']' ] - Move one Level Up in the cmd tree\n");
-    printw("8. config [ %s ] console name <console name> - set/unset new console name\n", NEGATE_CHARACTER);
-    printw("9. [UP DOWN Arrow] - show the command history\n");
+    cprintf("\nWelcome to Help Wizard\n");
+    cprintf("========================\n");
+    cprintf("1. Use %c Character after the command to enter command mode\n", MODE_CHARACTER);
+    cprintf("2. Use %c Character after the command to see possible follow up suboptions\n", SUBOPTIONS_CHARACTER);
+    cprintf("3. Use %c Character after the command to see possible complete command completions\n", CMD_EXPANSION_CHARACTER);
+    cprintf("4. [ ctrl + l ] - clear screen\n");
+    cprintf("5. [ ctrl + t ] - jump to top of cmd tree\n");
+    cprintf("6. [ BackSpace ] - Erase the last word\n");
+    cprintf("7. [ Page Up  Or  ctrl + ']' ] - Move one Level Up in the cmd tree\n");
+    cprintf("8. config [ %s ] console name <console name> - set/unset new console name\n", NEGATE_CHARACTER);
+    cprintf("9. [UP DOWN Arrow] - show the command history\n");
     attroff(COLOR_PAIR(GREEN_ON_BLACK));
     attron(COLOR_PAIR(PLAYER_PAIR));
-    printw( "          Author : Abhishek Sagar\n");
-    printw( "          Visit : www.csepracticals.com for more courses and projects\n");
+    cprintf( "          Author : Abhishek Sagar\n");
+    cprintf( "          Visit : www.csepracticals.com for more courses and projects\n");
     attroff(COLOR_PAIR(PLAYER_PAIR));
     return 0;
 }

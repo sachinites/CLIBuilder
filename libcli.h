@@ -7,8 +7,6 @@
 #include "CmdTree/CmdTree.h"
 #include "cmdtlv.h"
 
-#define printf printw 
-
 void
 libcli_init ();
 
@@ -24,7 +22,7 @@ init_param(param_t *param,
            const char *help);
 
 void 
-libcli_register_param(param_t *parent, param_t *child);
+libcli_register_param (param_t *parent, param_t *child);
 
 void 
 libcli_set_param_cmd_code (param_t *param, int cmd_code) ;
@@ -37,5 +35,9 @@ libcli_init_done ();
 
 void
 cli_start_shell();
+
+int cprintf (const char* format, ...) ;
+
+#define printf cprintf
 
 #endif

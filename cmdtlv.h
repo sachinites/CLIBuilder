@@ -29,7 +29,8 @@
 #include "cli_const.h"
 #include "string_util.h"
 
-#define printf printw 
+int cprintf (const char* format, ...) ;
+#define printf cprintf
 
 #pragma pack (push,1)
 typedef struct tlv_struct{
@@ -73,10 +74,10 @@ print_tlv_content (tlv_struct_t *tlv){
     if(!tlv)
         return;
 
-    printf ("tlv->tlv_type = %d\n", tlv->tlv_type);
-    printf("tlv->leaf_type = %s\n", get_str_leaf_type(tlv->leaf_type));
-    printf("tlv->leaf_id   = %s\n", tlv->leaf_id);
-    printf("tlv->value     = %s\n", tlv->value);
+    printf ("\ntlv->tlv_type = %d", tlv->tlv_type);
+    printf("\ntlv->leaf_type = %s", get_str_leaf_type(tlv->leaf_type));
+    printf("\ntlv->leaf_id   = %s", tlv->leaf_id);
+    printf("\ntlv->value     = %s", tlv->value);
 }
 
 static inline bool

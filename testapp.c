@@ -41,12 +41,13 @@ show_ip_igmp_groups_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_o
     tlv_struct_t *tlv;
 #if 1
     printf ("\nenable or disable = %d", enable_or_disable);
+#else 
     TLV_LOOP_STACK_BEGIN (tlv_stack, tlv) {
 
         print_tlv_content (tlv);
 
     } TLV_LOOP_END;
-#else 
+
     Stack_t *stack = (Stack_t *)tlv_buf;
     int i;
     for (i = 0; i <= stack->top; i++) {
