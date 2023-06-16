@@ -2,6 +2,7 @@
 #define __CMDTREE__
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "../cli_const.h"
 #include "../gluethread/glthread.h"
 #include "CmdTreeEnums.h"
@@ -60,7 +61,7 @@ GLTHREAD_TO_STRUCT (glue_to_param, param_t, glue);
 
 #define PARAM_F_NO_EXPAND   1
 #define PARAM_F_NO_DISPLAY_QUESMARK 2
-#define PARAM_F_DISABLE_PARAM   3
+#define PARAM_F_DISABLE_PARAM   4
 
 void 
 cmd_tree_init ();

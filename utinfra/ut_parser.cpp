@@ -19,7 +19,11 @@
 #include "../string_util.h"
 #include "../CmdTree/cmdcodes_def.h"
 
-#define UT_PARSER_BUFF_MAX_SIZE MAX_COMMAND_LENGTH
+#define MAX_MESSAGES    1
+#define MAX_MSG_SIZE       4096 /* must match with CUM_BUFFER_MAX_SIZE */
+#define QUEUE_PERMISSIONS   0660
+
+#define UT_PARSER_BUFF_MAX_SIZE MAX_MSG_SIZE
 
 /* Global variables for UT parser */
 int UT_PARSER_MSG_Q_FD; 
@@ -31,9 +35,7 @@ static FILE *ut_log_file = NULL;
 static uint64_t int_store1, int_store2, int_store3;
 static struct timespec mq_wait_time;
 
-#define MAX_MESSAGES    1
-#define MAX_MSG_SIZE       2048
-#define QUEUE_PERMISSIONS   0660
+
 
 extern bool
 cmdtc_parse_raw_command (unsigned char *command, int cmd_size) ;
@@ -161,6 +163,7 @@ run_test_case(char *file_name, uint16_t tc_no) {
             if (line[0] != ':') continue;
             strtok(line, "\n");
 
+            /* replace the $INT_STOREX in a line with actual integer value*/
             rc = sprintf(buff, "%lu", int_store1);
             replaceSubstring(line, "$INT_STORE1", buff);
             rc = sprintf(buff, "%lu", int_store2);
@@ -174,6 +177,7 @@ run_test_case(char *file_name, uint16_t tc_no) {
                 token = strtok(NULL, ":") ;
                 current_tc_no = atoi(token);
 
+                /* If the user specified particular testcase no in CLI, then find that TC only*/
                 while (tc_no &&  current_tc_no != tc_no) {
 
                     /* skip to next test case */

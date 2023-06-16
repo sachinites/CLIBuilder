@@ -34,7 +34,7 @@
 :PRINT: Config the Protocol 
 
 :STEP:1
-:CMD:show help
+:CMD:show help | include [
 :STEP:2
 :CMD:show ip igmp groups
 :STEP:3

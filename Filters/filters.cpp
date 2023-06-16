@@ -27,10 +27,13 @@
 #include "../cmdtlv.h"
 
 #define OBUFFER_SIZE  256
+#define CUM_BUFFER_MAX_SIZE 4096 /* must match with MAX_MSG_SIZE*/
 
 static tlv_struct_t **filter_array = NULL;
 static int filter_array_size = 0;
 static unsigned char Obuffer[OBUFFER_SIZE] = {0};
+static unsigned char Cumbuffer[CUM_BUFFER_MAX_SIZE] = {0};
+static uint16_t cum_buffer_byte_cnt = 0;
 static int count_lines = 0;
 static bool count_filter_present = false;
 static bool save_filter_present = false;
@@ -61,8 +64,13 @@ SetFilterContext (tlv_struct_t **lfilter_array, int lsize) {
 void 
 UnsetFilterContext () {
 
-    if (count_filter_present ) {
-        printw ("\nlines : %d", count_lines);
+    if (count_filter_present) {
+        if (!TC_RUNNING) {
+            printw ("\nlines : %d", count_lines);
+        }
+        else {
+            cum_buffer_byte_cnt +=  sprintf((char *)Cumbuffer + cum_buffer_byte_cnt, "lines : %d", count_lines);
+        }
     }
 
     filter_array = NULL;
@@ -71,12 +79,26 @@ UnsetFilterContext () {
     count_filter_present = false;
     save_filter_present = false;
     first_line = false;
+
+    if (TC_RUNNING) {
+
+        /* The show output of the command has come to an end , push all the show output data to
+            the TC infra for further parsing and analysis*/
+        if (mq_send (UT_PARSER_MSG_Q_FD, (char *)Cumbuffer, cum_buffer_byte_cnt + 1, 0) == -1 ) {
+            printw ("mq_send failed on FD %d, errno = %d\n", UT_PARSER_MSG_Q_FD, errno);
+        }
+
+        /* Reset the Cum buffer for the next show command */
+        memset (Cumbuffer, 0, cum_buffer_byte_cnt);
+        cum_buffer_byte_cnt = 0;
+    }
+
 }
 
 static void 
-render_line (unsigned char *Obuffer) {
+render_line (unsigned char *Obuffer, int msg_len) {
 
-    if (!first_line) {
+    if (!TC_RUNNING && !first_line) {
 
         printw("\n");
         first_line = true;
@@ -87,11 +109,10 @@ render_line (unsigned char *Obuffer) {
         return;
     }
 
-    if (mq_send (UT_PARSER_MSG_Q_FD, (char *)Obuffer, (strlen((char *)Obuffer) + 1), 0) == -1 ) {
-        
-            printw ("mq_send failed on FD %d, errno = %d\n", UT_PARSER_MSG_Q_FD, errno);
-    }
-
+    /* If the Test case is running, then collect individual printf statements in a Cumbuffer
+        until all the show o/p of the command is collected. */
+    memcpy (Cumbuffer +  cum_buffer_byte_cnt, Obuffer,  msg_len);
+    cum_buffer_byte_cnt += msg_len;
 }
 
 
@@ -99,6 +120,7 @@ int cprintf (const char* format, ...) {
 
     int i;
     va_list args;
+    int msg_len;
     tlv_struct_t *tlv;
     bool patt_rc = false;
     bool inc_exc_pattern_present = false;
@@ -106,14 +128,13 @@ int cprintf (const char* format, ...) {
     va_start(args, format);
     memset (Obuffer, 0, OBUFFER_SIZE);
     vsnprintf((char *)Obuffer, OBUFFER_SIZE, format, args);
-
-    //printw ("\nAnalyse: %s", Obuffer);
+    msg_len = strlen ((const char *)Obuffer);
 
     va_end(args);
 
     if (filter_array_size == 0) {
 
-         render_line (Obuffer);
+         render_line (Obuffer, msg_len);
          return 0;
     }
 
@@ -124,7 +145,7 @@ int cprintf (const char* format, ...) {
 
              inc_exc_pattern_present = true;
 
-            patt_rc = filter_inclusion (Obuffer, OBUFFER_SIZE, 
+            patt_rc = filter_inclusion (Obuffer, msg_len, 
                                                 (unsigned char *)tlv->value, 
                                                 strlen ((const char *)tlv->value));
             if (!patt_rc) return 0;
@@ -133,7 +154,7 @@ int cprintf (const char* format, ...) {
 
              inc_exc_pattern_present = true;
 
-            patt_rc = filter_exclusion (Obuffer, OBUFFER_SIZE, 
+            patt_rc = filter_exclusion (Obuffer, msg_len, 
                                                 (unsigned char *)tlv->value, 
                                                 strlen ((const char *)tlv->value));
 
@@ -153,13 +174,12 @@ int cprintf (const char* format, ...) {
         else if (strcmp ((const char *)tlv->leaf_id, "sfile-name") == 0) {
             
             save_filter_present = true;
-            
         }        
     }
 
     if (inc_exc_pattern_present && patt_rc && !count_filter_present && !save_filter_present) {
 
-        render_line (Obuffer);
+        render_line (Obuffer, msg_len);
     }
 
     return 0;
