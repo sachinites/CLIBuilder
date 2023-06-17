@@ -69,7 +69,7 @@ UnsetFilterContext () {
             printw ("\nlines : %d", count_lines);
         }
         else {
-            cum_buffer_byte_cnt +=  sprintf((char *)Cumbuffer + cum_buffer_byte_cnt, "lines : %d", count_lines);
+            cum_buffer_byte_cnt +=  sprintf((char *)Cumbuffer + cum_buffer_byte_cnt, "lines : %d\n", count_lines);
         }
     }
 

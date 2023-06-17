@@ -59,7 +59,7 @@ ${CLILIB}: ${OBJ}
 
 testapp.exe:testapp.o ${CLILIB}
 	@echo "Building testapp.exe"
-	${CC} -g testapp.o -o testapp.exe -L . -lcli -lncurses
+	${CC} -g testapp.o -o testapp.exe -L . -lcli -lncurses -lrt
 	@echo "Build Finished : " ${CLILIB} testapp.exe
 
 clean:
