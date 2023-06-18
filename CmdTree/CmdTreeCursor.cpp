@@ -722,7 +722,14 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
             }
             free(tlv);
 
-             /* User has typed ' ' while inputting the value of leaf. Go to next level*/
+            if (cmdtc->curr_param->cmd_type.leaf->user_validation_cb_fn &&
+                (cmdtc->curr_param->cmd_type.leaf->user_validation_cb_fn(
+                    cmdtc->tlv_stack,  cmdtc->curr_leaf_value) == LEAF_VALIDATION_FAILED)) {
+                
+                return cmdt_cursor_no_match_further;
+            }
+
+            /* User has typed ' ' while inputting the value of leaf. Go to next level*/
             cmd_tree_cursor_move_to_next_level (cmdtc);
             return cmdt_cursor_ok;
 

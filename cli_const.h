@@ -5,7 +5,7 @@
 
 #define MAX_COMMAND_LENGTH 256
 
-#define DEF_CLI_HDR  "Soft-Firewall>$ "
+#define DEF_CLI_HDR  "Router>$ "
 #define CMD_NAME_SIZE   32
 #define LEAF_VALUE_HOLDER_SIZE 32
 #define LEAF_ID_SIZE    32

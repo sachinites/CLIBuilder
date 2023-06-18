@@ -57,9 +57,13 @@ ${CLILIB}: ${OBJ}
 	@echo "Building Library ${CLILIB}"
 	ar rs ${CLILIB} ${OBJ}
 
-testapp.exe:testapp.o ${CLILIB}
+acl_cli.o:acl_cli.c
+	@echo "Building acl_cli.o"
+	@ ${CC} ${CFLAGS} -c ${INCLUDES} acl_cli.c -o acl_cli.o
+
+testapp.exe:testapp.o acl_cli.o ${CLILIB}
 	@echo "Building testapp.exe"
-	${CC} -g testapp.o -o testapp.exe -L . -lcli -lncurses -lrt
+	${CC} -g testapp.o acl_cli.o -o testapp.exe -L . -lcli -lncurses -lrt
 	@echo "Build Finished : " ${CLILIB} testapp.exe
 
 clean:

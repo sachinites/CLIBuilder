@@ -24,6 +24,8 @@
 #define MTRACE_SOURCE_DEST_GROUP    3
 #define MTRACE_SOURCE_GROUP         4
 
+extern void acl_build_show_cli(param_t *root);
+extern void acl_build_config_cli(param_t *root) ;
 
 static void
 list_vlans(param_t *param, ser_buff_t *tlv_buf){
@@ -102,6 +104,9 @@ main(int argc, char **argv){
     //param_t *debug  = libcli_get_debug_hook();
     param_t *config = libcli_get_config_hook();
 
+    acl_build_show_cli (show);
+    acl_build_config_cli (config);
+    
     static param_t cmsh;
     init_param(&cmsh, CMD, "cmsh", 0, 0, INVALID, 0, "cmsh hidden commands");
     libcli_register_param(0, &cmsh);

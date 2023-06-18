@@ -533,7 +533,7 @@ cmd_tree_construct_filter_subtree () {
             libcli_register_param (&exclude, &exclude_leaf);
             libcli_register_param (&exclude_leaf, &pipe);
         }
-    }    
+    }
 }
 
 static void 
@@ -543,7 +543,7 @@ libcli_augment_show_cmds_internal (param_t *param) {
     if (!param) return;
     if (param->flags & PARAM_F_NO_EXPAND) return;
     if (param == &pipe) return;
-    
+
     for (i = CHILDREN_START_INDEX ; i <= CHILDREN_END_INDEX; i++) {
         libcli_augment_show_cmds_internal (param->options[i]);
     }
@@ -571,9 +571,9 @@ cmd_tree_init () {
 void 
 libcli_init_done () {
 
-    libcli_support_cmd_negation (libcli_get_config_hook());
     cmd_tree_construct_filter_subtree();
     libcli_augment_show_cmds ();
+    libcli_support_cmd_negation (libcli_get_config_hook());
 }
 
 bool 
