@@ -1046,7 +1046,7 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
         while (!cmdtc_is_params_stack_empty (cmdtc->params_stack)) {
             pop(cmdtc->params_stack);
         }
-        while (!cmdtc_is_tlv_stack_empty (cmdtc->tlv_stack)) {
+        while (!cmdtc_is_tlv_stack_empty (cmdtc->tlv_stack)) {  
             free(pop(cmdtc->tlv_stack));
         }
 
@@ -1268,14 +1268,16 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         cmd_tree_cursor_init (&temp_cmdtc);
         cmdtc = temp_cmdtc;
 
-        /* Rebuild the params_stack and TLV buffer from scratch*/
+        /* Rebuild the params_stack and TLV stack from scratch*/
         for (i = cli_cmdtc->stack_checkpoint + 1 ; i <= cli_cmdtc->params_stack->top; i++) {
             param = (param_t *) cli_cmdtc->params_stack->slot[i];
             push (cmdtc->params_stack, (void *)param);
             push (cmdtc->tlv_stack, (void *)cli_cmdtc->tlv_stack->slot[i]);
         }
         
-        /* Compute the new Filter checkpoint by removing the params of the outer cmd.*/
+        /* Compute the new Filter checkpoint by removing the params of the outer cmd.
+        For example if user triggers this CLI : config-mtrace-source-1.1.1.1> show ip igmp groups | include igmp
+        the filter checkpoint must be updated from 8 to 4 in new cmdtc*/
         if (cli_cmdtc->filter_checkpoint > -1) {
             cmdtc->filter_checkpoint = cli_cmdtc->filter_checkpoint - cli_cmdtc->stack_checkpoint;
         }

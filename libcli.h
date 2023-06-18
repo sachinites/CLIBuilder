@@ -30,6 +30,14 @@ libcli_set_param_cmd_code (param_t *param, int cmd_code) ;
 void
 libcli_support_cmd_negation (param_t *param);
 
+static inline bool
+parser_match_leaf_id (unsigned char *tlv_leaf_id, const char *leaf_id_manual) {
+
+    size_t len;
+    if ((len = strlen((const char *)tlv_leaf_id)) != strlen(leaf_id_manual)) return false;
+    return (strncmp((const char *)tlv_leaf_id, leaf_id_manual, len) == 0); 
+}
+
 void 
 libcli_init_done ();
 

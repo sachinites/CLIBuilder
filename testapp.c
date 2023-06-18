@@ -40,25 +40,7 @@ list_vlans(param_t *param, ser_buff_t *tlv_buf){
 int
 show_ip_igmp_groups_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
 
-    tlv_struct_t *tlv;
-#if 1
     printf ("\nenable or disable = %d", enable_or_disable);
-#else 
-    TLV_LOOP_STACK_BEGIN (tlv_stack, tlv) {
-
-        print_tlv_content (tlv);
-
-    } TLV_LOOP_END;
-
-    Stack_t *stack = (Stack_t *)tlv_buf;
-    int i;
-    for (i = 0; i <= stack->top; i++) {
-        tlv_struct_t *tlv = (tlv_struct_t *)stack->slot[i];
-        print_tlv_content (tlv);
-    }
-
-#endif
-    return 0;
 }
 
 int
