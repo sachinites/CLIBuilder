@@ -308,8 +308,6 @@ cmd_tree_display_all_complete_commands(
             return;
 
         if (root->flags & PARAM_F_NO_EXPAND) return;
-        if (IS_PARAM_NO_CMD(root)) return;
-        if (root->flags & PARAM_F_NO_EXPAND) return;
         
         if (IS_PARAM_CMD(root)){
             untokenize(index);
@@ -501,6 +499,7 @@ libcli_support_cmd_negation (param_t *param) {
 
     assert(i <= CHILDREN_END_INDEX);
     param->options[i] = negate_param;
+    negate_param->flags = PARAM_F_NO_EXPAND;
 }
 
 static void

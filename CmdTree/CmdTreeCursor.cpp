@@ -249,10 +249,64 @@ cmdtc_is_tlv_stack_empty (Stack_t *tlv_stack) {
     return rc;
 }
 
+/* We are about to exit this Param while moving down in the cmd tree
+    cmdtc->curr_param is already updated to point to new param, params_stack is not
+*/
+static void 
+cmdtc_param_exit_forward (cmd_tree_cursor_t *cmdtc, param_t *param) {
+
+    if (IS_PARAM_NO_CMD(param)) {
+        param->flags |= PARAM_F_NO_EXPAND;
+    }
+}
+
+/*We have just entered this param while moving down the cmdtree
+    cmdtc->curr_param and params_stack has been updated
+*/
+static void 
+cmdtc_param_entered_forward (cmd_tree_cursor_t *cmdtc, param_t *param) {
+    
+    if (IS_PARAM_NO_CMD (cmdtc->curr_param)) {
+        cmdtc->is_negate = true;
+        /* Provide command completio for no param*/
+        param->flags &= ~PARAM_F_NO_EXPAND;
+    }
+
+    if (cmd_tree_is_param_pipe (cmdtc->curr_param) &&
+        cmdtc->filter_checkpoint == -1) {
+        cmdtc->filter_checkpoint = cmdtc->params_stack->top;
+    }
+}
+
+/* We are about to exit this param while moving up the cmd tree
+    cmdtc->curr_param and params_stack has not been updated yet
+    therefore, cmdtc->curr_param == StackGetTopElem( ) == param(arg)
+*/
+static void 
+cmdtc_param_exit_backward (cmd_tree_cursor_t *cmdtc, param_t *param) {
+
+    if (IS_PARAM_NO_CMD(param)) {
+        cmdtc->is_negate = false;
+        param->flags |= PARAM_F_NO_EXPAND;
+    }
+}
+
+/* We  have just entered this param while moving up in the cmd tree.
+    cmdtc->curr_param and Stack top has been updated to point to this param (arg)*/
+static void 
+cmdtc_param_entered_backward (cmd_tree_cursor_t *cmdtc, param_t *param) {
+
+    if (IS_PARAM_NO_CMD(param)) {
+        param->flags &= ~PARAM_F_NO_EXPAND;
+    }
+}
+
+
 /* Fn to move the cmd tree cursor one level down the tree*/
 void 
 cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
 
+    cmdtc_param_exit_forward (cmdtc, (param_t *)StackGetTopElem(cmdtc->params_stack));
     push(cmdtc->params_stack, (void *)cmdtc->curr_param);
     push (cmdtc->tlv_stack, (void *) cmd_tree_convert_param_to_tlv (
                                 cmdtc->curr_param, cmdtc->curr_leaf_value));
@@ -261,13 +315,7 @@ cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
     cmdtc->cmdtc_state = cmdt_cur_state_init;
     while (dequeue_glthread_first(&cmdtc->matching_params_list));
     cmdtc->leaf_param = NULL;
-    if (IS_PARAM_NO_CMD (cmdtc->curr_param)) {
-        cmdtc->is_negate = true;
-    }
-    if (cmd_tree_is_param_pipe (cmdtc->curr_param) &&
-        cmdtc->filter_checkpoint == -1) {
-        cmdtc->filter_checkpoint = cmdtc->params_stack->top;
-    }
+    cmdtc_param_entered_forward (cmdtc, cmdtc->curr_param);
 }
 
 bool 
@@ -317,6 +365,7 @@ cmd_tree_cursor_move_one_level_up (
                 cmdtc->stack_checkpoint--;
             }
             
+            cmdtc_param_exit_backward (cmdtc, cmdtc->curr_param);
             pop(cmdtc->params_stack);
             tlv = (tlv_struct_t *)pop(cmdtc->tlv_stack);
             
@@ -328,13 +377,10 @@ cmd_tree_cursor_move_one_level_up (
 
             free (tlv);
 
-            if (IS_PARAM_NO_CMD (cmdtc->curr_param)) {
-                cmdtc->is_negate = false;
-            }
-
             memset (cmdtc->curr_leaf_value, 0, sizeof (cmdtc->curr_leaf_value));
             cmdtc->curr_param =  (param_t *)StackGetTopElem(cmdtc->params_stack);
-            
+            cmdtc_param_entered_backward (cmdtc, cmdtc->curr_param);
+
             /* This fn is called for PAGE_UP and BACKSPACE. We need to update root
                 only in case of PAGE_UP only*/
             if (update_root) {
@@ -362,6 +408,9 @@ cmd_tree_cursor_move_one_level_up (
             break; 
         case cmdt_cur_state_single_word_match: 
         case cmdt_cur_state_matching_leaf:
+        /* This param was not yet pushed into prams_stack, So, we are not doing
+            exit/enter up-hill in cmdtree. so no need to call
+            cmdtc_param_exit_backward() / cmdtc_param_entered_backward*/
             if (cmdtc->leaf_param) {
                 memset (cmdtc->curr_leaf_value, 0, cmdtc->icursor);
                 cmdtc->leaf_param = NULL;
