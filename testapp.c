@@ -18,11 +18,16 @@
 
 #include <stdlib.h>
 #include "libcli.h"
+#include "Tracer/tracer.h"
 
 #define MTRACE_SOURCE               1
 #define MTRACE_SOURCE_DEST          2
 #define MTRACE_SOURCE_DEST_GROUP    3
 #define MTRACE_SOURCE_GROUP         4
+
+#define MTRACE_LOG  1
+#define IGMP_LOG 2
+tracer_t *tr;
 
 extern void acl_build_show_cli(param_t *root);
 extern void acl_build_config_cli(param_t *root) ;
@@ -41,12 +46,16 @@ int
 show_ip_igmp_groups_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
 
     printf ("\nenable or disable = %d", enable_or_disable);
+    trace (tr, IGMP_LOG, "igmp logs %s\n", "printed");
 }
 
 int
 mtrace_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
 
     printf ("\nenable or disable = %d", enable_or_disable);
+    
+    trace (tr, MTRACE_LOG, "mtrace logs %s\n", "printed");
+
     tlv_struct_t *tlv;
     TLV_LOOP_STACK_BEGIN (tlv_stack, tlv) {
 
@@ -81,6 +90,10 @@ main(int argc, char **argv){
     
     libcli_init ();
     /*Level 0*/
+
+    tr = tracer_init ("mcast", "sample-log.txt", STDOUT_FILENO, MTRACE_LOG | IGMP_LOG);
+    enable_file_logging (tr, true);
+    enable_console_logging(tr, true);
 
     param_t *show   = libcli_get_show_hook();
     //param_t *debug  = libcli_get_debug_hook();

@@ -95,6 +95,58 @@ cmd_tree_init_cursors () {
     cmd_tree_cursor_init (&cmdtc_cbc);
 }
 
+/* We are about to exit this Param while moving down in the cmd tree
+    cmdtc->curr_param is already updated to point to new param, params_stack is not
+*/
+static void 
+cmdtc_param_exit_forward (cmd_tree_cursor_t *cmdtc, param_t *param) {
+
+    if (IS_PARAM_NO_CMD(param)) {
+        param->flags |= PARAM_F_NO_EXPAND;
+    }
+}
+
+/*We have just entered this param while moving down the cmdtree
+    cmdtc->curr_param and params_stack has been updated
+*/
+static void 
+cmdtc_param_entered_forward (cmd_tree_cursor_t *cmdtc, param_t *param) {
+    
+    if (IS_PARAM_NO_CMD (cmdtc->curr_param)) {
+        cmdtc->is_negate = true;
+        /* Provide command completio for no param*/
+        param->flags &= ~PARAM_F_NO_EXPAND;
+    }
+
+    if (cmd_tree_is_param_pipe (cmdtc->curr_param) &&
+        cmdtc->filter_checkpoint == -1) {
+        cmdtc->filter_checkpoint = cmdtc->params_stack->top;
+    }
+}
+
+/* We are about to exit this param Or has just exited this param already. Do the 
+    processing here for param exit uphill in cmd tree.
+*/
+static void 
+cmdtc_param_exit_backward (cmd_tree_cursor_t *cmdtc, param_t *param) {
+
+    if (IS_PARAM_NO_CMD(param)) {
+        cmdtc->is_negate = false;
+        param->flags |= PARAM_F_NO_EXPAND;
+    }
+}
+
+/* We  have just entered this param while moving up in the cmd tree.
+    cmdtc->curr_param and Stack top has been updated to point to this param (arg)*/
+static void 
+cmdtc_param_entered_backward (cmd_tree_cursor_t *cmdtc, param_t *param) {
+
+    if (IS_PARAM_NO_CMD(param)) {
+        param->flags &= ~PARAM_F_NO_EXPAND;
+    }
+}
+
+
 /* Initialize the Cursor to the Base State*/
 void 
 cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
@@ -102,7 +154,9 @@ cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
     param_t *param;
     tlv_struct_t *tlv;
 
-    while ((param = (param_t *)pop(cmdtc->params_stack)));
+    while ((param = (param_t *)pop(cmdtc->params_stack))) {
+        cmdtc_param_exit_backward (cmdtc, param);
+    }
     while ((tlv = (tlv_struct_t *)pop(cmdtc->tlv_stack))) {
         free(tlv);
     }
@@ -248,59 +302,6 @@ cmdtc_is_tlv_stack_empty (Stack_t *tlv_stack) {
     assert (rc);
     return rc;
 }
-
-/* We are about to exit this Param while moving down in the cmd tree
-    cmdtc->curr_param is already updated to point to new param, params_stack is not
-*/
-static void 
-cmdtc_param_exit_forward (cmd_tree_cursor_t *cmdtc, param_t *param) {
-
-    if (IS_PARAM_NO_CMD(param)) {
-        param->flags |= PARAM_F_NO_EXPAND;
-    }
-}
-
-/*We have just entered this param while moving down the cmdtree
-    cmdtc->curr_param and params_stack has been updated
-*/
-static void 
-cmdtc_param_entered_forward (cmd_tree_cursor_t *cmdtc, param_t *param) {
-    
-    if (IS_PARAM_NO_CMD (cmdtc->curr_param)) {
-        cmdtc->is_negate = true;
-        /* Provide command completio for no param*/
-        param->flags &= ~PARAM_F_NO_EXPAND;
-    }
-
-    if (cmd_tree_is_param_pipe (cmdtc->curr_param) &&
-        cmdtc->filter_checkpoint == -1) {
-        cmdtc->filter_checkpoint = cmdtc->params_stack->top;
-    }
-}
-
-/* We are about to exit this param while moving up the cmd tree
-    cmdtc->curr_param and params_stack has not been updated yet
-    therefore, cmdtc->curr_param == StackGetTopElem( ) == param(arg)
-*/
-static void 
-cmdtc_param_exit_backward (cmd_tree_cursor_t *cmdtc, param_t *param) {
-
-    if (IS_PARAM_NO_CMD(param)) {
-        cmdtc->is_negate = false;
-        param->flags |= PARAM_F_NO_EXPAND;
-    }
-}
-
-/* We  have just entered this param while moving up in the cmd tree.
-    cmdtc->curr_param and Stack top has been updated to point to this param (arg)*/
-static void 
-cmdtc_param_entered_backward (cmd_tree_cursor_t *cmdtc, param_t *param) {
-
-    if (IS_PARAM_NO_CMD(param)) {
-        param->flags &= ~PARAM_F_NO_EXPAND;
-    }
-}
-
 
 /* Fn to move the cmd tree cursor one level down the tree*/
 void 
@@ -1093,7 +1094,8 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
         cmd_tree_uninstall_universal_params ((param_t *)StackGetTopElem(cmdtc->params_stack));
 
         while (!cmdtc_is_params_stack_empty (cmdtc->params_stack)) {
-            pop(cmdtc->params_stack);
+            param = (param_t *)pop(cmdtc->params_stack);
+            cmdtc_param_exit_backward (cmdtc, param);
         }
         while (!cmdtc_is_tlv_stack_empty (cmdtc->tlv_stack)) {  
             free(pop(cmdtc->tlv_stack));
@@ -1202,12 +1204,8 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
     while (cmdtc->params_stack->top > cmdtc->stack_checkpoint) {
 
         param = (param_t *)pop(cmdtc->params_stack);
+        cmdtc_param_exit_backward (cmdtc, param);
         free (pop(cmdtc->tlv_stack));
-
-        if (IS_PARAM_NO_CMD(param)) {
-            assert (cmdtc->is_negate);
-            cmdtc->is_negate = false;
-        }
     }
 
     if (cmdtc->params_stack->top < cmdtc->filter_checkpoint) {

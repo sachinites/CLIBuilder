@@ -12,6 +12,7 @@ OBJ=KeyProcessor/KeyProcessor.o \
 		 gluethread/glthread.o \
 		 Filters/filters.o \
 		 utinfra/ut_parser.o \
+		 Tracer/tracer.o \
 		 
 KeyProcessor/KeyProcessor.o:KeyProcessor/KeyProcessor.cpp
 	@echo "Building KeyProcessor/KeyProcessor.o"
@@ -49,6 +50,10 @@ utinfra/ut_parser.o:utinfra/ut_parser.cpp
 	@echo "Building utinfra/ut_parser.o"
 	@ ${CC} ${CFLAGS} -c ${INCLUDES} utinfra/ut_parser.cpp -o utinfra/ut_parser.o
 
+Tracer/tracer.o:Tracer/tracer.cpp
+	@echo "Building Tracer/tracer.o"
+	@ ${CC} ${CFLAGS} -c -I Tracer Tracer/tracer.cpp -o Tracer/tracer.o 
+
 testapp.o:testapp.c
 	@echo "Building testapp.o"
 	@ ${CC} ${CFLAGS} -c ${INCLUDES} testapp.c -o testapp.o
@@ -63,7 +68,7 @@ acl_cli.o:acl_cli.c
 
 testapp.exe:testapp.o acl_cli.o ${CLILIB}
 	@echo "Building testapp.exe"
-	${CC} -g testapp.o acl_cli.o -o testapp.exe -L . -lcli -lncurses -lrt
+	${CC} -g testapp.o acl_cli.o -o testapp.exe -L . -lcli -lncurses -lrt -lpthread
 	@echo "Build Finished : " ${CLILIB} testapp.exe
 
 clean:
@@ -75,10 +80,13 @@ clean:
 	rm -f gluethread/*.o 
 	rm -f Filters/*.o
 	rm -f utinfra/*.o
+	rm -f Tracer/*.o
 	rm -f ${CLILIB}
 install:
 	cp ${CLILIB} /usr/local/lib/
 	cp libcli.h /usr/include/
+	cp tracer.h /usr/include/
 uninstall:
 	rm -f /usr/local/lib/${CLILIB}
 	rm -f /usr/include/libcli.h
+	rm -f /usr/include/tracer.h
