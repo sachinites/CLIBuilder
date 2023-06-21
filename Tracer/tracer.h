@@ -11,6 +11,9 @@ typedef struct tracer_ tracer_t;
 tracer_t *
 tracer_init (const char *tr_str_id, const char *file_name, int out_fd, uint64_t logging_bits) ;
 
+void
+tracer_deinit (tracer_t *tracer) ;
+
 void 
 trace (tracer_t *tracer, uint64_t bit, const char *format, ...);
 

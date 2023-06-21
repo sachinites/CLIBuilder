@@ -58,6 +58,52 @@ tracer_init (const char *tr_str_id, const char *file_name, int out_fd, uint64_t 
     return tr;
 }
 
+static void
+tracer_remove(tracer_t *tracer){
+    
+    if(!tracer->left){
+        if(tracer->right){
+            tracer->right->left = NULL;
+            tracer->right = 0;
+            return;
+        }   
+        return;
+    }   
+    if(!tracer->right){
+        tracer->left->right = NULL;
+        tracer->left = NULL;
+        return;
+    }   
+
+    tracer->left->right = tracer->right;
+    tracer->right->left = tracer->left;
+    tracer->left = 0;
+    tracer->right = 0;
+}
+
+
+void
+tracer_deinit (tracer_t *tracer) {
+
+    if (tracer->log_file) {
+        fclose (tracer->log_file);
+        tracer->log_file = NULL;
+    }
+
+    pthread_spin_destroy (&tracer->spin_lock);
+
+    if (list_head == tracer) {
+        list_head = tracer->right;
+        if (list_head) list_head->left = NULL;
+        free(tracer);
+        return;
+    }
+
+    tracer_remove (tracer);
+    free (tracer);
+}
+
+
 #ifdef CLI_INTG
 extern int cprintf (const char* format, ...) ;
 #endif 
