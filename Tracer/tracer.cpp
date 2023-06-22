@@ -9,6 +9,14 @@
 #define LOG_BUFFER_SIZE 256
 #define CLI_INTG
 
+#ifdef CLI_INTG
+extern int cprintf (const char* format, ...) ;
+#endif 
+
+static uint64_t flush_count = 0;
+#define FLUSH_MAX   10
+
+
 typedef enum log_flags_ {
 
     ENABLE_FILE_LOG = 1,
@@ -25,7 +33,7 @@ typedef struct tracer_ {
     uint64_t bits;
     struct tracer_ *left;
     struct tracer_ *right;
-    uint8_t ctrl_flags;
+    uint8_t op_flags;
     pthread_spinlock_t spin_lock;
 } tracer_t;
 
@@ -103,13 +111,12 @@ tracer_deinit (tracer_t *tracer) {
     free (tracer);
 }
 
-
-#ifdef CLI_INTG
-extern int cprintf (const char* format, ...) ;
-#endif 
-
 void 
-trace (tracer_t *tracer, uint64_t bit, const char *format, ...) {
+trace_internal (tracer_t *tracer,
+          uint64_t bit,
+          const char *FN,
+          const int lineno,
+          const char *format, ...) {
 
     va_list args;
 
@@ -120,7 +127,7 @@ trace (tracer_t *tracer, uint64_t bit, const char *format, ...) {
         return;
     }
 
-    if (!tracer->ctrl_flags) {
+    if (!tracer->op_flags) {
         pthread_spin_unlock (&tracer->spin_lock);
         return;
     }
@@ -128,17 +135,21 @@ trace (tracer_t *tracer, uint64_t bit, const char *format, ...) {
     va_start(args, format);
 
     memset (tracer->Logbuffer, 0, tracer->log_msg_len);
-    tracer->log_msg_len = vsnprintf((char *)tracer->Logbuffer, LOG_BUFFER_SIZE, format, args);
+    tracer->log_msg_len = sprintf ((char *)tracer->Logbuffer , "%s(%d): ", FN, lineno);
+    tracer->log_msg_len += vsnprintf((char *)tracer->Logbuffer + tracer->log_msg_len, LOG_BUFFER_SIZE - tracer->log_msg_len, format, args);
     tracer->log_msg_len++;   // count \0 character
     va_end(args);
 
-    if (tracer->log_file && (tracer->ctrl_flags & ENABLE_FILE_LOG)) {
-
+    if (tracer->log_file && (tracer->op_flags & ENABLE_FILE_LOG)) {
+        
         fwrite (tracer->Logbuffer, 1 , tracer->log_msg_len, tracer->log_file);
-        fflush (tracer->log_file);
+        flush_count++;
+        if (flush_count % FLUSH_MAX == 0) {
+            fflush (tracer->log_file);
+        }
     }
 
-    if (tracer->ctrl_flags & ENABLE_CONSOLE_LOG) {
+    if (tracer->op_flags & ENABLE_CONSOLE_LOG) {
         #ifndef CLI_INTG
         write (tracer->out_fd, tracer->Logbuffer, tracer->log_msg_len);
         #else 
@@ -150,31 +161,57 @@ trace (tracer_t *tracer, uint64_t bit, const char *format, ...) {
  }
 
 void 
-enable_file_logging (tracer_t *tracer, bool enable) {
+tracer_enable_file_logging (tracer_t *tracer, bool enable) {
 
     pthread_spin_lock (&tracer->spin_lock);
 
     if (enable) {
-        tracer->ctrl_flags |= ENABLE_FILE_LOG;
+        tracer->op_flags |= ENABLE_FILE_LOG;
     }
     else {
-        tracer->ctrl_flags &= ~ENABLE_FILE_LOG;
+        tracer->op_flags &= ~ENABLE_FILE_LOG;
     }
 
     pthread_spin_unlock (&tracer->spin_lock);
 }
 
 void 
-enable_console_logging (tracer_t *tracer, bool enable) {
+tracer_enable_console_logging (tracer_t *tracer, bool enable) {
 
     pthread_spin_lock (&tracer->spin_lock);
 
     if (enable) {
-        tracer->ctrl_flags |= ENABLE_CONSOLE_LOG;
+        tracer->op_flags |= ENABLE_CONSOLE_LOG;
     }
     else {
-        tracer->ctrl_flags &= ~ENABLE_CONSOLE_LOG;
+        tracer->op_flags &= ~ENABLE_CONSOLE_LOG;
     }
 
+    pthread_spin_unlock (&tracer->spin_lock);
+}
+
+void 
+tracer_log_bit_set (tracer_t *tracer, uint64_t log_bit) {
+
+    pthread_spin_lock (&tracer->spin_lock);
+    tracer->bits |= log_bit;
+    pthread_spin_unlock (&tracer->spin_lock);
+}
+
+void 
+tracer_log_bit_unset (tracer_t *tracer, uint64_t log_bit){
+
+    pthread_spin_lock (&tracer->spin_lock);
+    tracer->bits &= ~log_bit;
+    pthread_spin_unlock (&tracer->spin_lock);
+}
+
+void 
+tracer_clear_log_file (tracer_t *tracer) {
+
+    pthread_spin_lock (&tracer->spin_lock);
+    if (tracer->log_file) {
+        tracer->log_file = freopen (NULL, "w+", tracer->log_file);
+    }
     pthread_spin_unlock (&tracer->spin_lock);
 }

@@ -55,6 +55,7 @@ mtrace_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
     printf ("\nenable or disable = %d", enable_or_disable);
     
     trace (tr, MTRACE_LOG, "mtrace logs %s\n", "printed");
+    //trace (tr, MTRACE_LOG, "%s(%d) :: mtrace logs %s\n", FNL, "printed");
 
     tlv_struct_t *tlv;
     TLV_LOOP_STACK_BEGIN (tlv_stack, tlv) {
@@ -92,8 +93,8 @@ main(int argc, char **argv){
     /*Level 0*/
 
     tr = tracer_init ("mcast", "sample-log.txt", STDOUT_FILENO, MTRACE_LOG | IGMP_LOG);
-    enable_file_logging (tr, true);
-    enable_console_logging(tr, true);
+    tracer_enable_file_logging (tr, true);
+    tracer_enable_console_logging(tr, true);
 
     param_t *show   = libcli_get_show_hook();
     //param_t *debug  = libcli_get_debug_hook();
