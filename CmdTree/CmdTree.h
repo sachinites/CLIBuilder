@@ -14,7 +14,7 @@ typedef struct stack Stack_t;
 
 typedef int (*user_validation_callback)(Stack_t *, unsigned char *leaf_value);
 typedef void (*display_possible_values_callback)(param_t *, Stack_t *);
-typedef int (*cmd_callback)(param_t *param, 
+typedef int (*cmd_callback)(int cmdcode, 
                                               Stack_t *tlv_stack,
                                               op_mode enable_or_diable);
 

@@ -1366,7 +1366,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
 
         cmdtc_set_filter_context (cmdtc);
         
-        if (param->callback (param, cmdtc->tlv_stack, enable_or_diable)) {
+        if (param->callback (param->CMDCODE, cmdtc->tlv_stack, enable_or_diable)) {
             cli_cmdtc->success = false;
         }
 
@@ -1389,7 +1389,7 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
 
         cmdtc->tlv_stack->top = i;
 
-        if (param->callback (param, cmdtc->tlv_stack, enable_or_diable)) {
+        if (param->callback (param->CMDCODE, cmdtc->tlv_stack, enable_or_diable)) {
             cli_cmdtc->success = false;
             break;
         }

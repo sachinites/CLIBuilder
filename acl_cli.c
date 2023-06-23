@@ -34,7 +34,7 @@ acl_port_no_LEAF_VALIDATION (Stack_t *stack, unsigned char *value) {
 }
 
 static int
-acl_config_handler(param_t *param,
+acl_config_handler(int cmdcode,
                    Stack_t *tlv_stack,
                    op_mode enable_or_disable)
 {
@@ -64,10 +64,6 @@ acl_config_handler(param_t *param,
              dst_port_no_gt = 0,
              dst_port_no1 = 0,
              dst_port_no2 = 0;
-
-    int cmdcode = -1;
-
-    cmdcode = param->CMDCODE;
 
     TLV_LOOP_STACK_BEGIN(tlv_stack, tlv)
     {
@@ -448,7 +444,7 @@ acl_build_config_cli(param_t *root) {
 
 
 static int
-acl_show_handler(param_t *param,
+acl_show_handler(int cmdcode,
                  Stack_t *tlv_stack,
                  op_mode enable_or_disable) {
 

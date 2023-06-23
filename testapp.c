@@ -43,14 +43,14 @@ list_vlans(param_t *param, ser_buff_t *tlv_buf){
 }
 
 int
-show_ip_igmp_groups_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
+show_ip_igmp_groups_handler(int cmdcode, Stack_t *tlv_stack, op_mode enable_or_disable){
 
     printf ("\nenable or disable = %d", enable_or_disable);
     trace (tr, IGMP_LOG, "igmp logs %s\n", "printed");
 }
 
 int
-mtrace_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
+mtrace_handler(int cmdcode, Stack_t *tlv_stack, op_mode enable_or_disable){
 
     printf ("\nenable or disable = %d", enable_or_disable);
     
@@ -68,7 +68,7 @@ mtrace_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
 
 
 int
-config_router_name_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
+config_router_name_handler(int cmdcode, Stack_t *tlv_stack, op_mode enable_or_disable){
 
     return 0;
 }
@@ -92,7 +92,7 @@ main(int argc, char **argv){
     libcli_init ();
     /*Level 0*/
 
-    tr = tracer_init ("mcast", "sample-log.txt", STDOUT_FILENO, MTRACE_LOG | IGMP_LOG);
+    tr = tracer_init ("mcast", "sample-log.txt", NULL, STDOUT_FILENO, MTRACE_LOG | IGMP_LOG);
     tracer_enable_file_logging (tr, true);
     tracer_enable_console_logging(tr, true);
 
