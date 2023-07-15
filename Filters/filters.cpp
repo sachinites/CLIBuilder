@@ -11,7 +11,7 @@
  *       Compiler:  gcc
  *
  *         Author:  Er. Abhishek Sagar, Networking Developer (AS), sachinites@gmail.com
- *        Company:  Brocade Communications(2012-2016)
+ *        Company:  Brocade Communications(2012-2017)
  *                          Juniper Networks(2017-2021)
  *                          Cisco Systems(2021-2023)
  *                          CALIX(2023-Present)
@@ -24,7 +24,9 @@
 #include <stdint.h>
 #include <errno.h>
 #include <mqueue.h>
-#include "../cmdtlv.h"
+#include <regex.h>
+#include <pthread.h>
+#include "../libcli.h"
 
 #define OBUFFER_SIZE  256
 #define CUM_BUFFER_MAX_SIZE 4096 /* must match with MAX_MSG_SIZE*/
@@ -36,11 +38,20 @@ static unsigned char Cumbuffer[CUM_BUFFER_MAX_SIZE] = {0};
 static uint16_t cum_buffer_byte_cnt = 0;
 static int count_lines = 0;
 static bool count_filter_present = false;
-static bool save_filter_present = false;
+FILE *fileptr = NULL;
 static bool first_line = false;
 
 extern bool TC_RUNNING ;
 extern int UT_PARSER_MSG_Q_FD; 
+
+
+static pthread_spinlock_t cprintf_spinlock;
+
+void 
+init_filters () {
+
+    pthread_spin_init (&cprintf_spinlock, 0);
+}
 
 static bool
 filter_inclusion (unsigned char *buffer, int size, unsigned char *pattern, int pattern_size) {
@@ -77,7 +88,12 @@ UnsetFilterContext () {
     filter_array_size = 0;
     count_lines = 0;
     count_filter_present = false;
-    save_filter_present = false;
+    
+    if (fileptr) {
+        fclose (fileptr);
+        fileptr = NULL;
+    }
+
     first_line = false;
 
     if (TC_RUNNING) {
@@ -98,24 +114,29 @@ UnsetFilterContext () {
 static void 
 render_line (unsigned char *Obuffer, int msg_len) {
 
-    if (!TC_RUNNING && !first_line) {
+    if (TC_RUNNING) {
+    /* If the Test case is running, then collect individual printf statements in a Cumbuffer
+        until all the show o/p of the command is collected. */
+        memcpy(Cumbuffer + cum_buffer_byte_cnt, Obuffer, msg_len);
+        cum_buffer_byte_cnt += msg_len;
+        return;
+    }
+
+    if (fileptr) {
+        fwrite (Obuffer, 1, msg_len, fileptr);
+        return;
+    }
+
+    if (!first_line) {
 
         printw("\n");
         first_line = true;
     }
 
-    if (!TC_RUNNING) {
-        printw("%s", Obuffer);
-        return;
-    }
-
-    /* If the Test case is running, then collect individual printf statements in a Cumbuffer
-        until all the show o/p of the command is collected. */
-    memcpy (Cumbuffer +  cum_buffer_byte_cnt, Obuffer,  msg_len);
-    cum_buffer_byte_cnt += msg_len;
+     printw("%s", Obuffer);
 }
 
-
+/* override glibc printf */
 int cprintf (const char* format, ...) {
 
     int i;
@@ -124,6 +145,8 @@ int cprintf (const char* format, ...) {
     tlv_struct_t *tlv;
     bool patt_rc = false;
     bool inc_exc_pattern_present = false;
+
+    pthread_spin_lock (&cprintf_spinlock);
 
     va_start(args, format);
     memset (Obuffer, 0, OBUFFER_SIZE);
@@ -135,32 +158,72 @@ int cprintf (const char* format, ...) {
     if (filter_array_size == 0) {
 
          render_line (Obuffer, msg_len);
+         pthread_spin_unlock (&cprintf_spinlock);
          return 0;
     }
 
     for (i = 0; i < filter_array_size; i++) {
         
         tlv = filter_array[i];
-        if (strcmp ((const char *)tlv->leaf_id, "incl-pattern") == 0) {
+
+        if (parser_match_leaf_id (tlv->leaf_id, "incl-pattern")) {
 
              inc_exc_pattern_present = true;
 
             patt_rc = filter_inclusion (Obuffer, msg_len, 
                                                 (unsigned char *)tlv->value, 
                                                 strlen ((const char *)tlv->value));
-            if (!patt_rc) return 0;
+            if (!patt_rc) {
+                pthread_spin_unlock (&cprintf_spinlock);
+                return 0;
+            }
         }
-        else if (strcmp ((const char *)tlv->leaf_id, "excl-pattern") == 0) {
+        else if (parser_match_leaf_id (tlv->leaf_id, "excl-pattern")) {
 
-             inc_exc_pattern_present = true;
+            inc_exc_pattern_present = true;
 
             patt_rc = filter_exclusion (Obuffer, msg_len, 
                                                 (unsigned char *)tlv->value, 
                                                 strlen ((const char *)tlv->value));
 
-            if (!patt_rc) return 0;
+            if (!patt_rc) {
+                pthread_spin_unlock (&cprintf_spinlock);
+                return 0;
+            }
         }
-        else if (strcmp ((const char *)tlv->value, "count") == 0) {
+
+        else if (parser_match_leaf_id (tlv->leaf_id, "grep-pattern")) {
+            
+            inc_exc_pattern_present = true;
+            regex_t regex;
+            char error_buffer[128];
+
+            int match = regcomp(&regex, (const char *)tlv->value, REG_EXTENDED);
+
+            if (match) {
+
+                memset (error_buffer, 0, sizeof (error_buffer));
+                regerror(match, &regex, error_buffer, sizeof(error_buffer));
+                printw ("\nFailed to compile regex pattern %s, error : %s",
+                    tlv->value, error_buffer);
+                regfree(&regex);
+                pthread_spin_unlock (&cprintf_spinlock);
+                return 0;
+            }
+
+            match = regexec(&regex, (const char *)Obuffer, 0, NULL, 0);
+
+            if (match) {
+                 regfree(&regex);
+                 pthread_spin_unlock (&cprintf_spinlock);
+                return 0;
+            }
+
+            patt_rc = true;
+            regfree(&regex);
+        }
+
+        else if (parser_match_leaf_id (tlv->value, "count")) {
             
             count_filter_present  = true;
 
@@ -171,16 +234,20 @@ int cprintf (const char* format, ...) {
                 count_lines++;
             }
         }
-        else if (strcmp ((const char *)tlv->leaf_id, "sfile-name") == 0) {
+        else if (parser_match_leaf_id (tlv->leaf_id, "sfile-name")) {
             
-            save_filter_present = true;
+            if (!fileptr) {
+                fileptr = fopen ((const char *) tlv->value, "w+");
+                assert(fileptr);
+            }
         }        
     }
 
-    if (inc_exc_pattern_present && patt_rc && !count_filter_present && !save_filter_present) {
+    if (!count_filter_present ) {
 
         render_line (Obuffer, msg_len);
     }
 
+    pthread_spin_unlock (&cprintf_spinlock);
     return 0;
 }

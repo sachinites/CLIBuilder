@@ -7,6 +7,8 @@
 #include "CmdTree/CmdTree.h"
 #include "cmdtlv.h"
 
+int cprintf (const char* format, ...) ;
+
 void
 libcli_init ();
 
@@ -38,14 +40,18 @@ parser_match_leaf_id (unsigned char *tlv_leaf_id, const char *leaf_id_manual) {
     return (strncmp((const char *)tlv_leaf_id, leaf_id_manual, len) == 0); 
 }
 
+void
+libcli_register_display_callback (param_t *param, display_possible_values_callback cbk);
+
+void 
+libcli_set_tail_config_batch_processing (param_t *param);
+
 void 
 libcli_init_done ();
 
 void
 cli_start_shell();
 
-int cprintf (const char* format, ...) ;
-
-#define printf cprintf
+void cli_register_ctrlC_handler(void (*fn_ptr)(void));
 
 #endif

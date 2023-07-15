@@ -12,7 +12,7 @@
 #include "../cmdtlv.h"
 
 extern int
-ut_test_handler (param_t *param, 
+ut_test_handler (int cmdcode,
                             Stack_t *tlv_stack,
                             op_mode enable_or_disable) ;
 
@@ -33,6 +33,12 @@ static param_t include;
 static param_t include_leaf;
 static param_t exclude;
  static param_t exclude_leaf;
+static param_t grepx;
+static param_t grepx_leaf;
+static param_t refreshx;
+static param_t refresh_val;
+static param_t clrscr;
+
 
 static param_t *universal_params[] = {&show, &config};
 
@@ -54,6 +60,9 @@ libcli_set_param_cmd_code(param_t *param, int cmd_code) ;
 
 void
 libcli_support_cmd_negation (param_t *param);
+
+void 
+libcli_set_tail_config_one_shot (param_t *param);
 
 void
 init_param(param_t *param,    
@@ -106,7 +115,6 @@ init_param(param_t *param,
     init_glthread (&param->glue);
 }
 
-
 void 
 libcli_register_param(param_t *parent, param_t *child) {
 
@@ -118,6 +126,7 @@ libcli_register_param(param_t *parent, param_t *child) {
         if (parent->options[i])
             continue;
         parent->options[i] = child;
+        child->parent = parent;
         return;
     }   
     assert(0);
@@ -129,6 +138,29 @@ libcli_set_param_cmd_code(param_t *param, int cmd_code) {
     if (param->callback == NULL)
         assert(0);
     param->CMDCODE = cmd_code;
+}
+
+void 
+libcli_set_tail_config_batch_processing (param_t *param) {
+
+    param_t *origp = param;
+
+    while ( param != libcli_get_config_hook () ) {
+
+            if (param->flags & PARAM_F_CONFIG_BATCH_CMD) break;
+            
+            if (param->callback ) {
+                param->flags |= PARAM_F_CONFIG_BATCH_CMD;
+            }
+            
+            param = param->parent;
+    }
+
+    /* This is required while copy-pasting the param sub-trees across branches in
+        config tree*/
+    if (!origp->callback) {
+        param->flags &= ~PARAM_F_CONFIG_BATCH_CMD;
+    }
 }
 
 static void 
@@ -211,6 +243,13 @@ static void
         }   
     }
 
+    {
+        /* run terminate*/
+        static param_t terminate;
+        init_param(&terminate, CMD, "term", cli_terminate_handler, 0, INVALID, 0, "Terminate appln");
+        libcli_register_param(&run, &terminate);
+    }
+
     hook = libcli_get_debug_hook();
 
     {
@@ -263,6 +302,24 @@ param_t *
 libcli_get_run_hook(void)
 {
     return &run;
+}
+
+param_t *
+libcli_get_refresh_hook(void)
+{
+    return &refreshx;
+}
+
+param_t *
+libcli_get_refresh_val_hook(void)
+{
+    return &refresh_val;
+}
+
+param_t *
+libcli_get_clrscr_hook(void)
+{
+    return &clrscr;
 }
 
 bool
@@ -502,6 +559,29 @@ libcli_support_cmd_negation (param_t *param) {
     negate_param->flags = PARAM_F_NO_EXPAND;
 }
 
+static void 
+libcli_cleanup_parent_pointers_internal (param_t *param) {
+
+    int i;
+
+    if (!param) return;
+    if (param == &pipe) return;
+
+    for (i = CHILDREN_START_INDEX ; i <= CHILDREN_END_INDEX; i++) {
+        libcli_cleanup_parent_pointers_internal (param->options[i]);
+    }
+
+    /* In our library design, param->parent is suppose to be null during normal
+        opn*/
+    param->parent = NULL;
+}
+
+static void 
+libcli_cleanup_parent_pointers () {
+
+    libcli_cleanup_parent_pointers_internal (libcli_get_root_hook());
+}
+
 static void
 cmd_tree_construct_filter_subtree () {
 
@@ -510,11 +590,16 @@ cmd_tree_construct_filter_subtree () {
     init_param (&count, CMD, "count", NULL, NULL, INVALID, NULL, "count lines");
     init_param (&save, CMD, "save", NULL, NULL, INVALID, NULL, "save to a file");
     init_param (&save_file, LEAF, NULL, NULL, NULL, STRING, "sfile-name", "file name");
-    libcli_register_param (&save, &save_file);
 
-    libcli_register_param (&pipe, &count);
-    libcli_register_param (&pipe, &save);
-
+    {
+        libcli_register_param (&save, &save_file);
+    }
+    {
+        libcli_register_param (&pipe, &count);
+    }
+    {
+        libcli_register_param (&pipe, &save);
+    }
     {
         init_param (&include,  CMD, "include", NULL, NULL, INVALID, NULL, "Include Pattern");
         libcli_register_param (&pipe, &include);
@@ -531,6 +616,26 @@ cmd_tree_construct_filter_subtree () {
             init_param (&exclude_leaf,  LEAF, NULL, NULL, NULL, STRING, "excl-pattern", "Exclude Pattern");
             libcli_register_param (&exclude, &exclude_leaf);
             libcli_register_param (&exclude_leaf, &pipe);
+        }
+    }
+    {
+        init_param(&grepx, CMD, "grep", NULL, NULL, INVALID, NULL, "grep RegEx Pattern");
+        libcli_register_param(&pipe, &grepx);
+        {
+            init_param(&grepx_leaf, LEAF, NULL, NULL, NULL, STRING, "grep-pattern", "Grep Pattern");
+            libcli_register_param(&grepx, &grepx_leaf);
+            libcli_register_param(&grepx_leaf, &pipe);
+        }
+    }
+    {
+        init_param (&refreshx, CMD, "refresh", NULL, NULL, INVALID, NULL, "Refresh the command repeatedly");
+        init_param (&refresh_val, LEAF, NULL, NULL, NULL, INT, "refresh-val", "Refresh Time Interval in Sec");
+        libcli_register_param (&refreshx, &refresh_val);
+        libcli_register_param (&pipe, &refreshx);
+        libcli_register_param (&refresh_val, &pipe);
+        {
+             init_param (&clrscr, CMD, "cls", NULL, NULL, INVALID, NULL, "Clear the screen");
+             libcli_register_param (&refresh_val, &clrscr);
         }
     }
 }
@@ -573,6 +678,7 @@ libcli_init_done () {
     cmd_tree_construct_filter_subtree();
     libcli_augment_show_cmds ();
     libcli_support_cmd_negation (libcli_get_config_hook());
+    libcli_cleanup_parent_pointers ();
 }
 
 bool 
@@ -587,5 +693,12 @@ cmd_tree_is_filter_param (param_t *param) {
     return (param == &pipe || param == &count || param == &save ||
                 param == &save_file || param == &include || 
                 param == &include_leaf || param == &exclude ||
-                param == &exclude_leaf);
+                param == &exclude_leaf ||
+                param == &grepx || param == &grepx_leaf);
+}
+
+void 
+libcli_register_display_callback (param_t *param, display_possible_values_callback cbk) {
+
+    param->disp_callback = cbk;
 }

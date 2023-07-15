@@ -26,6 +26,9 @@ cmdtc_tree_get_cursor ();
 void 
 cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) ;
 
+bool
+cmd_tree_cursor_move_one_char_back (cmd_tree_cursor_t *cmdtc);
+
 int
 cmd_tree_cursor_move_one_level_up (cmd_tree_cursor_t *cmdtc,
                                                                 bool honor_checkpoint, bool update_root) ;
@@ -42,7 +45,7 @@ cmdtc_get_state_str (cmd_tree_cursor_t *cmdtc);
 void 
 cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc);
 
-void 
+bool
 cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) ;
 
 bool 
@@ -92,5 +95,6 @@ cmdtc_get_branch_hook (cmd_tree_cursor_t *cmdtc);
 
 bool
 cmdtc_parse_raw_command (unsigned char *command, int cmd_size) ;
+
 
 #endif 

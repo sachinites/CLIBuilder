@@ -1,12 +1,15 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <ncurses.h>
 #include "../stack/stack.h"
 #include "clistd.h"
 #include "CmdTree.h"
 #include "../KeyProcessor/KeyProcessor.h"
 #include "../cmdtlv.h"
 #include "../string_util.h"
+
+extern int cprintf (const char* format, ...) ;
 
 /* Standard Validations Begin*/
 
@@ -140,7 +143,7 @@ clistd_validate_leaf (tlv_struct_t *tlv) {
 /* Standard Validations End */
 
 int
-clistd_config_device_default_handler (param_t *param,  Stack_t *tlv_stack, op_mode enable_or_disable) {
+clistd_config_device_default_handler (int cmdcode,  Stack_t *tlv_stack, op_mode enable_or_disable) {
 
     tlv_struct_t *tlv = NULL;
     
@@ -159,7 +162,7 @@ clistd_config_device_default_handler (param_t *param,  Stack_t *tlv_stack, op_mo
 }
 
 int
-show_help_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable){
+show_help_handler(int cmdcode, Stack_t *tlv_stack, op_mode enable_or_disable){
 
     attron(COLOR_PAIR(GREEN_ON_BLACK));
     cprintf("\nWelcome to Help Wizard\n");
@@ -182,8 +185,16 @@ show_help_handler(param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable)
 }
 
 int
-show_history_handler (param_t *param, Stack_t *tlv_stack, op_mode enable_or_disable) {
+show_history_handler (int cmdcode, Stack_t *tlv_stack, op_mode enable_or_disable) {
 
     cli_history_show ();
     return 0;
+}
+
+int
+cli_terminate_handler(int cmdcode, Stack_t *tlv_stack, op_mode enable_or_disable){
+
+    endwin();
+    cprintf("Bye Bye\n");
+    exit(0);
 }

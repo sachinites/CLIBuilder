@@ -11,10 +11,10 @@
  *       Compiler:  gcc/g++
  *
  *         Author:  Er. Abhishek Sagar, Networking Developer (AS), sachinites@gmail.com
- *        Company:  Brocade Communications(2012-2016)
- *                          Juniper Networks(2017-2021)
- *                          Cisco Systems(2021-2023)
- *                          CALIX(2023-Present)
+ *        Company:  Brocade Communications(2012-2017)
+ *                           Juniper Networks(2017-2021)
+ *                           Cisco Systems(2021-2023)
+ *                           CALIX(2023-Present)
  *
  * =====================================================================================
  */
@@ -22,6 +22,9 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <ncurses.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <semaphore.h>
 #include "../stack/stack.h"
 #include "../cmdtlv.h"
 #include "../string_util.h"
@@ -35,6 +38,9 @@ cli_process_key_interrupt(int ch);
 
 extern void  SetFilterContext (tlv_struct_t **lfilter_array, int lsize) ;
 extern void UnsetFilterContext () ;
+
+static bool is_refresh_in_progress = false;
+static bool CtrlC_refresh_terminate = false;
 
 typedef enum cmdt_cursor_state_ {
 
@@ -75,10 +81,22 @@ typedef struct cmd_tree_cursor_ {
     bool is_negate;
     /* Filter checkpoint */
     int filter_checkpoint;
+    /* need to refresh */
+    struct {
+        bool is_refresh;
+        bool clrscr;
+        int refresh_val;
+        pthread_t *th;
+        sem_t sem;
+    } refresh;
+
 } cmd_tree_cursor_t;
 
 /* This cursor will be used to prse the CLIs when Operating in Char-by-char Mode*/
 static cmd_tree_cursor_t *cmdtc_cbc = NULL;
+
+static void cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) ;
+static void cmd_tree_post_cli_trigger (cmd_tree_cursor_t *cli_cmdtc);
 
 void 
 cmd_tree_cursor_init (cmd_tree_cursor_t **cmdtc) {
@@ -95,7 +113,7 @@ cmd_tree_init_cursors () {
     cmd_tree_cursor_init (&cmdtc_cbc);
 }
 
-/* We are about to exit this Param while moving down in the cmd tree
+/* We are about to exit this Param (2nd arg) while moving down in the cmd tree
     cmdtc->curr_param is already updated to point to new param, params_stack is not
 */
 static void 
@@ -122,6 +140,26 @@ cmdtc_param_entered_forward (cmd_tree_cursor_t *cmdtc, param_t *param) {
         cmdtc->filter_checkpoint == -1) {
         cmdtc->filter_checkpoint = cmdtc->params_stack->top;
     }
+
+    if (param == libcli_get_refresh_hook()) {
+        cmdtc->refresh.is_refresh = true;
+        cmdtc->refresh.refresh_val = 0;
+    }
+
+    else if (param == libcli_get_refresh_val_hook()) {
+        assert (cmdtc->refresh.is_refresh);
+        cmdtc->refresh.refresh_val = atoi ((const char *)cmdtc->curr_leaf_value);
+        (libcli_get_refresh_hook()->flags) |= PARAM_F_DISABLE_PARAM;
+    }
+
+    else if (param == libcli_get_clrscr_hook()) {
+        cmdtc->refresh.clrscr = true;
+    }
+
+    /* Unconditionally cleanup the leaf as the current param may be CMD type,
+        but still we record  key strokes in curr_leaf_value if we have a leaf at current
+        level*/
+    memset (cmdtc->curr_leaf_value, 0, sizeof (cmdtc->curr_leaf_value));
 }
 
 /* We are about to exit this param Or has just exited this param already. Do the 
@@ -133,6 +171,15 @@ cmdtc_param_exit_backward (cmd_tree_cursor_t *cmdtc, param_t *param) {
     if (IS_PARAM_NO_CMD(param)) {
         cmdtc->is_negate = false;
         param->flags |= PARAM_F_NO_EXPAND;
+    }
+
+    else if (param == libcli_get_refresh_hook()) {
+        cmdtc->refresh.is_refresh = false;
+    }
+
+    else if (param == libcli_get_refresh_val_hook()) {
+        libcli_get_refresh_hook()->flags &= ~PARAM_F_DISABLE_PARAM;
+        cmdtc->refresh.clrscr = false;
     }
 }
 
@@ -154,9 +201,13 @@ cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
     param_t *param;
     tlv_struct_t *tlv;
 
-    while ((param = (param_t *)pop(cmdtc->params_stack))) {
+    while (!isStackEmpty (cmdtc->params_stack)) {
+        cmdtc_param_entered_backward (cmdtc, 
+            (param_t *)StackGetTopElem (cmdtc->params_stack));
+        param = (param_t *)pop(cmdtc->params_stack);
         cmdtc_param_exit_backward (cmdtc, param);
     }
+
     while ((tlv = (tlv_struct_t *)pop(cmdtc->tlv_stack))) {
         free(tlv);
     }
@@ -174,20 +225,37 @@ cmd_tree_cursor_deinit (cmd_tree_cursor_t *cmdtc) {
     cmdtc->leaf_param = NULL;
     cmdtc->success = false;
     cmdtc->is_negate = false;
+    cmdtc->refresh.is_refresh = false;
+    cmdtc->refresh.refresh_val = 0;
+    cmdtc->refresh.clrscr = false;
+    if (cmdtc->refresh.th) {
+        pthread_cancel (*cmdtc->refresh.th);
+        free(cmdtc->refresh.th);
+        cmdtc->refresh.th = NULL;
+        sem_destroy (&cmdtc->refresh.sem);
+    } 
 }
 
 void 
 cmd_tree_cursor_destroy_internals (cmd_tree_cursor_t *cmdtc, bool free_tlvs) {
 
+    param_t *param;
     tlv_struct_t *tlv;
 
     if (cmdtc->params_stack) {
-        reset_stack (cmdtc->params_stack);
+
+        while (!isStackEmpty(cmdtc->params_stack)) {
+            cmdtc_param_entered_backward(cmdtc,
+                                         (param_t *)StackGetTopElem(cmdtc->params_stack));
+            param = (param_t *)pop(cmdtc->params_stack);
+            cmdtc_param_exit_backward(cmdtc, param);
+        }
         free_stack (cmdtc->params_stack);
         cmdtc->params_stack = NULL;
     }
 
     if (cmdtc->tlv_stack) {
+
         while ((tlv = (tlv_struct_t *)pop(cmdtc->tlv_stack))) {
             if (free_tlvs) free(tlv);
         }
@@ -197,6 +265,7 @@ cmd_tree_cursor_destroy_internals (cmd_tree_cursor_t *cmdtc, bool free_tlvs) {
 
     memset (cmdtc->curr_leaf_value, 0, sizeof (cmdtc->curr_leaf_value));
     while ((dequeue_glthread_first (&cmdtc->matching_params_list)));
+    cmdtc->leaf_param = NULL;
 }
 
 
@@ -311,7 +380,6 @@ cmd_tree_cursor_move_to_next_level (cmd_tree_cursor_t *cmdtc) {
     push(cmdtc->params_stack, (void *)cmdtc->curr_param);
     push (cmdtc->tlv_stack, (void *) cmd_tree_convert_param_to_tlv (
                                 cmdtc->curr_param, cmdtc->curr_leaf_value));
-    memset (cmdtc->curr_leaf_value, 0, sizeof (cmdtc->curr_leaf_value));
     cmdtc->icursor = 0;
     cmdtc->cmdtc_state = cmdt_cur_state_init;
     while (dequeue_glthread_first(&cmdtc->matching_params_list));
@@ -334,6 +402,31 @@ cmdtc_is_cursor_at_apex_root (cmd_tree_cursor_t *cmdtc) {
     return rc;
 }
 
+bool
+cmd_tree_cursor_move_one_char_back (cmd_tree_cursor_t *cmdtc) {
+
+    switch (cmdtc->cmdtc_state) {
+        
+        case cmdt_cur_state_init:
+        case cmdt_cur_state_multiple_matches:
+        case cmdt_cur_state_single_word_match:
+            return false;
+        case cmdt_cur_state_matching_leaf:
+            cmdtc->curr_leaf_value[--cmdtc->icursor] = '\0';
+            if (cmdtc->icursor == 0) {
+                cmdtc->cmdtc_state =  cmdt_cur_state_init;
+                cmdtc->curr_param = (param_t *)StackGetTopElem (cmdtc->params_stack);
+                while ((dequeue_glthread_first (&cmdtc->matching_params_list)));
+                cmdtc->leaf_param = NULL;
+            }
+            return true;
+        case cmdt_cur_state_no_match:
+        default: ;
+    }
+    return false;
+}
+
+
 /* Fn to move the cursor one level up in the cmd tree. Note that this fn is called to implement BackSpace and Page UP
 In case of BackSpace, we would not like to lower down the checkpoints and update root
 In case of of Page UP, we would like to update checkpoints as well as root. Hence, pass
@@ -347,6 +440,7 @@ cmd_tree_cursor_move_one_level_up (
 
     int count = 0;
     tlv_struct_t *tlv;
+    param_t *param;
 
     switch (cmdtc->cmdtc_state) {
         case cmdt_cur_state_init:
@@ -358,7 +452,7 @@ cmd_tree_cursor_move_one_level_up (
             }
 
             if (cmdtc->filter_checkpoint == cmdtc->params_stack->top) {
-                    cmdtc->filter_checkpoint = -1;
+                cmdtc->filter_checkpoint = -1;
             }
 
             /* Lower down the checkpoint of the params_stack if we are at checkpoint*/
@@ -366,8 +460,9 @@ cmd_tree_cursor_move_one_level_up (
                 cmdtc->stack_checkpoint--;
             }
             
-            cmdtc_param_exit_backward (cmdtc, cmdtc->curr_param);
-            pop(cmdtc->params_stack);
+            cmdtc_param_entered_backward (cmdtc, cmdtc->curr_param);
+            param = (param_t *)pop(cmdtc->params_stack);
+            cmdtc_param_exit_backward (cmdtc, param);
             tlv = (tlv_struct_t *)pop(cmdtc->tlv_stack);
             
             count = (IS_PARAM_CMD (cmdtc->curr_param) || IS_PARAM_NO_CMD(cmdtc->curr_param)) ? \
@@ -391,6 +486,8 @@ cmd_tree_cursor_move_one_level_up (
                     cmd_tree_install_universal_params (cmdtc->root, cmdtc_get_branch_hook (cmdtc));
                 }
             }
+            while (dequeue_glthread_first(&cmdtc->matching_params_list));
+            cmdtc->leaf_param = NULL;
         break;
         case cmdt_cur_state_multiple_matches:
             if (cmdtc->leaf_param) {
@@ -601,7 +698,7 @@ cmdtc_collect_all_matching_params (cmd_tree_cursor_t *cmdtc, unsigned char c, bo
 }
 
 static void 
-cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
+cmdtc_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
 
     glthread_t *curr;
     param_t *param;
@@ -640,7 +737,12 @@ cmdt_cursor_display_options (cmd_tree_cursor_t *cmdtc) {
         
         printw ("\nnxt cmd  -> %-32s   |   %s", 
             GET_LEAF_TYPE_STR(cmdtc->leaf_param), 
-            GET_PARAM_HELP_STRING(cmdtc->leaf_param));        
+            GET_PARAM_HELP_STRING(cmdtc->leaf_param));
+
+        if (cmdtc->leaf_param->disp_callback) {
+            printw ("\nLeaf Values : \n");
+             cmdtc->leaf_param->disp_callback (cmdtc->leaf_param, cmdtc->tlv_stack);
+        }
     }
 
     done:
@@ -673,7 +775,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                 if (cmdtc->leaf_param) {
                     /* Leaf is available at this level, user just cant type ' '. Undo
                         the state change and block user cursor*/
-                    cmdt_cursor_display_options (cmdtc);
+                    cmdtc_cursor_display_options (cmdtc);
                     cmdtc->leaf_param = NULL;
                     return cmdt_cursor_no_match_further;
                 }
@@ -685,6 +787,12 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                     no leaf at this level. Auto-complete to the matching point amoing all params here*/
                 len = cmdtc_find_common_intial_lcs_len (&cmdtc->matching_params_list, 0);
 
+                if (len == 0) {
+                    /* User has just typed ' ' and none of the options progress to auto-completion (even partially). Just display options and stay in the same state*/
+                    cmdtc_cursor_display_options (cmdtc);
+                    return cmdt_cursor_no_match_further;
+                }
+
                 /* Take any param from the list*/
                 param = glue_to_param (glthread_get_next (&cmdtc->matching_params_list));
 
@@ -693,7 +801,7 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                     cli_process_key_interrupt (
                         (int)GET_CMD_NAME(param)[cmdtc->icursor]);
                 }
-                cmdt_cursor_display_options (cmdtc);
+                cmdtc_cursor_display_options (cmdtc);
                 cmdtc->cmdtc_state = cmdt_cur_state_multiple_matches;
                 return cmdt_cursor_no_match_further;
             }
@@ -736,14 +844,14 @@ cmdt_cursor_process_space (cmd_tree_cursor_t *cmdtc) {
                 return cmdt_cursor_ok;
             }
 
-            /* Do auto completion until the tie point amonst several matching key-words*/
+            /* Do auto completion until the tie point amongst several matching key-words*/
             len = cmdtc_find_common_intial_lcs_len (&cmdtc->matching_params_list, cmdtc->icursor);
             param = glue_to_param (glthread_get_next (&cmdtc->matching_params_list));
             while (len--) {
                 cli_process_key_interrupt (
                         (int)GET_CMD_NAME(param)[cmdtc->icursor]);
             }
-            cmdt_cursor_display_options (cmdtc);
+            cmdtc_cursor_display_options (cmdtc);
             return cmdt_cursor_no_match_further;
 
 
@@ -1017,15 +1125,15 @@ cmdtc_process_question_mark (cmd_tree_cursor_t *cmdtc) {
     if (!IS_GLTHREAD_LIST_EMPTY (&cmdtc->matching_params_list) ||
             cmdtc->leaf_param) {
         
-        cmdt_cursor_display_options (cmdtc);
+        cmdtc_cursor_display_options (cmdtc);
         return;
     }
 
     /* If user has not typed beginning a new word in a cli, then compute the next
-        set pf alternatives*/
+        set of alternatives*/
 
     mcount = cmdtc_collect_all_matching_params (cmdtc, 'X', true);
-    cmdt_cursor_display_options (cmdtc);
+    cmdtc_cursor_display_options (cmdtc);
     cmdtc->leaf_param = NULL;
     while (dequeue_glthread_first(&cmdtc->matching_params_list)) ;
 }
@@ -1054,18 +1162,28 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
 
     cli = cli_get_default_cli();
 
-    if (cmdtc->root == cmdtc->curr_param) return;
-    if (!cli_cursor_is_at_end_of_line (cli)) return;
-    if (cli_cursor_is_at_begin_of_line (cli)) return;
     if (!cli_is_char_mode_on()) return;
+    if (!cli_cursor_is_at_end_of_line (cli)) return;
+    if (cmdtc->cmdtc_state != cmdt_cur_state_init) return;
 
-    /* Allow Mode when we are either in init state Or 
-        in multiple match state but with i_cursor index as 0initde_init which
-        means, user has multiple options to choose from, but not yet
-        typed a single character yet*/
-    if ( ! ((cmdtc->cmdtc_state == cmdt_cur_state_init) ||
-            (cmdtc->cmdtc_state == cmdt_cur_state_multiple_matches &&
-                cmdtc->icursor == 0))) return;
+    /* If user is simply pressing / without typing anything in the current line*/
+    if (cli_cursor_is_at_begin_of_line (cli)) {
+
+        /* if user is at roof top, no action, stay silent*/
+        if (cmdtc->curr_param == libcli_get_root_hook()) return;
+
+        if (cmdtc_get_branch_hook (cmdtc) == libcli_get_config_hook()) {
+            /* No action to be taken if user is working in branch hook*/
+            return;
+        }
+         /* User is simply pressing / without typing anything. Fire the CLI in all
+                case except if user is working in config branch*/
+        cmd_tree_trigger_cli  (cmdtc);
+        cmd_tree_post_cli_trigger (cmdtc);
+        cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
+        cli_printsc (cli, true);
+        return;
+    }
 
     /* No point in going into Mode if we are at bottom of the cmd tree*/
     if (cmdtc_is_cursor_at_bottom_mode_node (cmdtc)) return;
@@ -1094,6 +1212,7 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
         cmd_tree_uninstall_universal_params ((param_t *)StackGetTopElem(cmdtc->params_stack));
 
         while (!cmdtc_is_params_stack_empty (cmdtc->params_stack)) {
+            cmdtc_param_entered_backward (cmdtc, (param_t *)StackGetTopElem (cmdtc->params_stack));
             param = (param_t *)pop(cmdtc->params_stack);
             cmdtc_param_exit_backward (cmdtc, param);
         }
@@ -1187,6 +1306,13 @@ cmd_tree_enter_mode (cmd_tree_cursor_t *cmdtc) {
     cmdtc->stack_checkpoint = cmdtc->params_stack->top;
 
     cmd_tree_install_universal_params (cmdtc->root, cmdtc_get_branch_hook(cmdtc));
+
+    if (cmdtc->root->callback) {
+        cmd_tree_trigger_cli (cmdtc);
+        cmd_tree_post_cli_trigger (cmdtc);
+        cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
+    }
+
     /* Finally display the new  prompt to the user */
     cli_printsc (cli, true);
 }
@@ -1203,6 +1329,8 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
     /* Restore the params_stack to the checkpoint */
     while (cmdtc->params_stack->top > cmdtc->stack_checkpoint) {
 
+        cmdtc_param_entered_backward (cmdtc, 
+            (param_t *)StackGetTopElem (cmdtc->params_stack));
         param = (param_t *)pop(cmdtc->params_stack);
         cmdtc_param_exit_backward (cmdtc, param);
         free (pop(cmdtc->tlv_stack));
@@ -1218,6 +1346,7 @@ cmd_tree_cursor_reset_for_nxt_cmd (cmd_tree_cursor_t *cmdtc) {
     cmdtc->curr_param = cmdtc->root;
 
     cmdtc->icursor = 0;
+    memset (cmdtc->curr_leaf_value, 0, sizeof (cmdtc->curr_leaf_value));
     cmdtc->success = false;
     cmdtc->cmdtc_state= cmdt_cur_state_init;
 
@@ -1266,12 +1395,50 @@ cmdtc_get_branch_hook (cmd_tree_cursor_t *cmdtc) {
 /* CLI Trigger Code */
 
 static void 
-cmd_tree_post_cli_trigger (cli_t *cli) {
+cmdtc_record_cli_history (cmd_tree_cursor_t *cmdtc) {
 
-    attron (COLOR_PAIR(GREEN_ON_BLACK));
-    printw ("\nParse Success\n");
-    attroff (COLOR_PAIR(GREEN_ON_BLACK));
-    cli_record_copy (cli_get_default_history(), cli);
+    int i;
+    param_t *param;
+    tlv_struct_t *tlv;
+
+    cli_t *cli = cli_malloc ();
+    cli_set_hdr (cli, (unsigned char *)DEF_CLI_HDR,  (uint8_t)strlen (DEF_CLI_HDR));
+
+    for ( i = cmdtc->params_stack->top; i > -1 ; i--) {
+        param = (param_t *)cmdtc->params_stack->slot[i];
+        if (param_is_hook (param)) break;
+    }
+
+    for (; i < cmdtc->params_stack->top; i++) {
+
+        tlv = (tlv_struct_t *) cmdtc->tlv_stack->slot[i];
+        cli_append_user_command (cli, tlv->value, strlen ((const char *)tlv->value));
+        cli_append_user_command (cli, (unsigned char *) " ", 1);
+    }
+
+    tlv = (tlv_struct_t *) cmdtc->tlv_stack->slot[i];
+    cli_append_user_command (cli, tlv->value, strlen ((const char *)tlv->value));
+    cli_append_user_command (cli, (unsigned char *) "\0", 1);
+
+    cli_record_cli_history (cli_get_default_history(), cli);
+}
+
+void 
+cmd_tree_post_cli_trigger (cmd_tree_cursor_t *cmdtc) {
+
+    if (cmdtc->success) {
+        attron (COLOR_PAIR(GREEN_ON_BLACK));
+        printw ("\nParse Success\n");
+        attroff (COLOR_PAIR(GREEN_ON_BLACK));
+    }
+    else {
+        attron (COLOR_PAIR(RED_ON_BLACK));
+        printw ("\nCommand Rejected\n");
+        attroff (COLOR_PAIR(RED_ON_BLACK));
+    }
+
+    if (!cmdtc->success) return;
+    cmdtc_record_cli_history (cmdtc);
 }
 
 static param_t *
@@ -1298,8 +1465,46 @@ cmdtc_set_filter_context (cmd_tree_cursor_t *cmdtc) {
                                   cmdtc->tlv_stack->top - cmdtc->filter_checkpoint + 1);
 }
 
+
+#define SCHED_SUBMISSION
+
+#ifdef SCHED_SUBMISSION
+extern void
+task_invoke_appln_cbk_handler (param_t *param,
+                                                     Stack_t  *tlv_stack,
+                                                     op_mode enable_or_disable);
+#endif 
+
+
+static void *
+cmd_trigger_cli_repeat (void *arg) {
+
+    cmd_tree_cursor_t *cmdtc;
+    
+    pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, 0);
+    pthread_setcanceltype (PTHREAD_CANCEL_DEFERRED, 0);
+
+    cmdtc = (cmd_tree_cursor_t *)arg;
+
+    while (1) {
+
+        cmd_tree_trigger_cli (cmdtc);
+        /* Both refresh and fflush are required when working with threads*/
+        refresh();
+        fflush(stdout);
+        sleep (cmdtc->refresh.refresh_val);
+        if (CtrlC_refresh_terminate) {
+            CtrlC_refresh_terminate = false;
+            is_refresh_in_progress = false;
+            sem_post (&cmdtc->refresh.sem);
+            pthread_exit(0);
+        }
+        cli_printsc(cli_get_default_cli(), true);
+    }
+}
+
 /* This function eventually submit the CLI to the backend application */
-static void 
+void 
 cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
 
     int i;
@@ -1307,7 +1512,48 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
     cmd_tree_cursor_t *cmdtc;
     op_mode enable_or_diable;
     cmd_tree_cursor_t *temp_cmdtc = NULL;
-   
+
+    /* Handle Refresh*/
+    if (cli_cmdtc->refresh.is_refresh &&
+            is_refresh_in_progress == false) {
+           
+        is_refresh_in_progress = true;
+
+        #if 0
+        pthread_attr_t attr;
+        pthread_attr_init (&attr);
+        pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_JOINABLE);
+        cmdtc->refresh.th = (pthread_t *)calloc (1, sizeof (pthread_t));
+        sem_init (&cmdtc->refresh.sem, 0, 0);
+        pthread_create (cli_cmdtc->refresh.th, &attr, cmd_trigger_cli_repeat, (void *)
+        cli_cmdtc);
+        sem_wait (&cli_cmdtc->refresh.sem);
+        return;
+
+        #else
+
+        while (1) {
+
+            cmd_tree_trigger_cli (cli_cmdtc);
+            if (!cli_cmdtc->refresh.refresh_val) break;
+            /* Both refresh and fflush are required when working with threads*/
+            refresh();
+            fflush(stdout);
+            sleep(cli_cmdtc->refresh.refresh_val);
+            if (CtrlC_refresh_terminate) {
+                CtrlC_refresh_terminate = false;
+                is_refresh_in_progress = false;
+                break;
+            }
+            if (cli_cmdtc->refresh.clrscr) clear();
+            cli_printsc (cli_get_default_cli (), true);
+        }
+        return;
+
+        #endif 
+    }
+
+
     /* if user is in nested mode, then we will use temporary cmdtc because
         original cmdtc's params_stack and TLV buffer we dont want */
     if ( cmdtc_am_i_working_in_nested_mode (cli_cmdtc)) {
@@ -1362,13 +1608,18 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
     /* Handle Trigger of Operational Or Config-Negate Cmds. Both Commands
         types are triggered in same way - just once*/
     if (enable_or_diable == OPERATIONAL ||
-            enable_or_diable == CONFIG_DISABLE) {
+            enable_or_diable == CONFIG_DISABLE ||
+             (!(param->flags & PARAM_F_CONFIG_BATCH_CMD))) {
 
         cmdtc_set_filter_context (cmdtc);
         
+        #ifndef SCHED_SUBMISSION
         if (param->callback (param->CMDCODE, cmdtc->tlv_stack, enable_or_diable)) {
             cli_cmdtc->success = false;
         }
+        #else 
+        task_invoke_appln_cbk_handler (param, cmdtc->tlv_stack, enable_or_diable);
+        #endif
 
         UnsetFilterContext ();
 
@@ -1376,8 +1627,11 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         return;
     }
 
+    /* Execute Tail one shot config commands */
+    assert (param->flags & PARAM_F_CONFIG_BATCH_CMD);
+
     /* Handle Trigger of Config Command. Config Commands are triggered in
-        patches !*/
+        batches if PARAM_F_CONFIG_BATCH_CMD flag is set !*/
     for (i = cmdtc->stack_checkpoint + 1 ; i <= cmdtc->params_stack->top; i++) {
 
         param = (param_t *)cmdtc->params_stack->slot[i];
@@ -1388,41 +1642,60 @@ cmd_tree_trigger_cli (cmd_tree_cursor_t *cli_cmdtc) {
         /* Temporarily over-write the size of TLV buffer */
 
         cmdtc->tlv_stack->top = i;
-
+        
+        #ifndef SCHED_SUBMISSION
         if (param->callback (param->CMDCODE, cmdtc->tlv_stack, enable_or_diable)) {
             cli_cmdtc->success = false;
             break;
         }
+        #else 
+        task_invoke_appln_cbk_handler (param, cmdtc->tlv_stack, enable_or_diable);
+        #endif 
     }
     cmdtc->tlv_stack->top = cmdtc->params_stack->top;
     if (temp_cmdtc) { cmd_tree_cursor_destroy_internals (cmdtc, false); free(cmdtc); }
 }
 
 /* Fn to process user CLI when he press ENTER key while working in 
-    char mode */
-void
+    char mode. Return true if the command is subnitted to backend */
+bool
 cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
 
+    bool rc;
+    param_t *param;
     cli_t *cli = cli_get_default_cli();
 
     /* User has simply pressed the entry key wihout typing anything.
         Nothing to do by cmdtree cursor, Keyprocessor will simply shift
         the cursor to next line*/
-    if (cli_is_buffer_empty (cli)) return;
-    if (!cli_is_char_mode_on ()) return;
-    
+    if (cli_is_buffer_empty (cli)) return true;
+    if (!cli_is_char_mode_on ()) return false;
+
     switch (cmdtc->cmdtc_state) {
         
         case cmdt_cur_state_init:
-            /*User has typed the complete current word, fir the CLI if last word
+            /*User has typed the complete current word, fire the CLI if last word
                 has appln callback, thenFire the CLI*/
+            cmdtc_param_exit_forward (cmdtc, cmdtc->curr_param);
             cmd_tree_trigger_cli (cmdtc);
-            if (cmdtc->success) {  cmd_tree_post_cli_trigger (cli);   }
+            cmd_tree_post_cli_trigger (cmdtc);   
             cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
-            return;
+            return true;
         case cmdt_cur_state_multiple_matches:
-            cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
-            return;
+            /* If the user press enter key while he still have multiple matches to choose from, check if the last word user has typed out matches exactly with one of the options, yes, then accept the word.*/
+            param =  cmdtc_filter_word_by_word_size 
+                            (&cmdtc->matching_params_list, cmdtc->icursor);
+            rc = false;
+            if (param) {
+                cmdtc->curr_param = param;
+                cmd_tree_cursor_move_to_next_level (cmdtc);
+                cmdtc_param_exit_forward (cmdtc, cmdtc->curr_param);
+                cmd_tree_trigger_cli (cmdtc);
+                cmd_tree_post_cli_trigger(cmdtc);
+                rc = cmdtc->success;
+            }
+            cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
+            return rc;
         case cmdt_cur_state_single_word_match:
             /* Auto complete the word , push into the params_stack and TLV buffer and fire the CLI*/
             /* only one option is matching and that is fixed word , do auto-completion*/
@@ -1430,11 +1703,13 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
                 cli_process_key_interrupt (
                         (int)GET_CMD_NAME(cmdtc->curr_param)[cmdtc->icursor]);
             }
-            cmd_tree_cursor_move_to_next_level (cmdtc);
+            /* Process space after word completion so that cmd tree cursor is updated and move to next param */
+            cli_process_key_interrupt (' ');
+            cmdtc_param_exit_forward (cmdtc, cmdtc->curr_param);
             cmd_tree_trigger_cli (cmdtc);
-            if (cmdtc->success) {  cmd_tree_post_cli_trigger (cli);   }
+            cmd_tree_post_cli_trigger (cmdtc);   
             cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
-            return;
+            return true;
         case cmdt_cur_state_matching_leaf:
             /* Standard Validation Checks on Leaf */
             tlv_struct_t *tlv;
@@ -1449,27 +1724,31 @@ cmd_tree_process_carriage_return_key (cmd_tree_cursor_t *cmdtc) {
                 attroff(COLOR_PAIR(RED_ON_BLACK));
                 cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
                 free(tlv);
-                return;
-            }       
+                return false;
+            }
             free(tlv);
-            /* Push it into the params_stack and Fire the CLI*/
-            cmd_tree_cursor_move_to_next_level (cmdtc);
+
+            /* Process space after word completion so that cmd tree cursor is updated and move to next param */
+            cli_process_key_interrupt (' ');
+             /* invoke exit on the last param to comply with the design*/
+            cmdtc_param_exit_forward (cmdtc, cmdtc->curr_param);
             cmd_tree_trigger_cli (cmdtc);
-            if (cmdtc->success) {  cmd_tree_post_cli_trigger (cli);   }
+            cmd_tree_post_cli_trigger (cmdtc);
             cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
-            return;
+            return true;
         case cmdt_cur_state_no_match:
             cmd_tree_cursor_reset_for_nxt_cmd (cmdtc);
-            return;
+            return false;
         default: ;
     }
+    return false;
  }
 
 
 static unsigned char command[MAX_COMMAND_LENGTH];
 
 /* Fn to process user CLI when he press ENTER key while working in 
-    line mode */
+    line mode. This fn always return true */
 bool
 cmdtc_parse_full_command (cli_t *cli) {
 
@@ -1548,7 +1827,7 @@ cmdtc_parse_full_command (cli_t *cli) {
                 cmd_tree_cursor_destroy_internals (cmdtc, true);
                 free(cmdtc);
             }
-            return false;
+            return true;
         }
 
         if (IS_PARAM_LEAF(param)) {
@@ -1574,7 +1853,7 @@ cmdtc_parse_full_command (cli_t *cli) {
                 }
 
                 free(tlvptr);
-                return false;
+                return true;
             }
             free(tlvptr);
 
@@ -1593,29 +1872,34 @@ cmdtc_parse_full_command (cli_t *cli) {
                 else {
                     cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
                 }
-                return false;
+                return true;
             }
 
+            cmdtc->curr_param = param;
+            cmdtc_param_exit_forward (cmdtc, (param_t *)StackGetTopElem (cmdtc->params_stack));
             push(cmdtc->params_stack, (void *)param);
             push (cmdtc->tlv_stack, (void *)cmd_tree_convert_param_to_tlv (
                                         param, (unsigned char *)*(tokens +i)));
+            strncpy ((char *)cmdtc->curr_leaf_value, *(tokens +i), LEAF_VALUE_HOLDER_SIZE);
+            cmdtc_param_entered_forward (cmdtc, param);
         }
 
         else if (IS_PARAM_CMD(param)){
+            cmdtc->curr_param = param;
+            cmdtc_param_exit_forward (cmdtc, (param_t *)StackGetTopElem (cmdtc->params_stack));
             push(cmdtc->params_stack, (void *)param);
             push (cmdtc->tlv_stack, (void *)cmd_tree_convert_param_to_tlv (param, NULL));
-
-            /* Set the filter checkpoint if we encounter the first pipe*/
-            if (cmd_tree_is_param_pipe (param) && cmdtc->filter_checkpoint == -1) {
-                cmdtc->filter_checkpoint = cmdtc->params_stack->top;
-            }
+            cmdtc_param_entered_forward (cmdtc, param);
         }
 
         else if (IS_PARAM_NO_CMD (param)) {
+            cmdtc->curr_param = param;
             if (!cmdtc->is_negate) {
                 cmdtc->is_negate = true;
+                cmdtc_param_exit_forward (cmdtc, (param_t *)StackGetTopElem (cmdtc->params_stack));
                 push(cmdtc->params_stack, (void *)param);
                 push (cmdtc->tlv_stack, (void *)cmd_tree_convert_param_to_tlv (param, NULL));
+                cmdtc_param_entered_forward (cmdtc, param);
             }
             else {
                 /* Negation appearing more than once in the command, ignore the subsequent
@@ -1624,22 +1908,16 @@ cmdtc_parse_full_command (cli_t *cli) {
         }
     }
 
-    /* Set the curr param to the top of the stack */
-    cmdtc->curr_param = (param_t *)StackGetTopElem (cmdtc->params_stack);
     cmd_tree_trigger_cli (cmdtc);
-
-    if (cmdtc->success) { 
-        cmd_tree_post_cli_trigger (cli);   
-    }
+    cmd_tree_post_cli_trigger (cmdtc);
 
     if (is_new_cmdtc) {
         cmd_tree_cursor_destroy_internals (cmdtc, true);
         free(cmdtc);
+        return true;
     }
-    else {
-        cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
-    }
-    
+
+    cmd_tree_cursor_reset_for_nxt_cmd(cmdtc);
     return true;
 }
 
@@ -1659,4 +1937,14 @@ cmdtc_parse_raw_command (unsigned char *command, int cmd_size) {
     free (cmdtc);
     free (cli);
     return rc;
+}
+
+bool
+libcli_terminate_refresh () {
+
+    if (is_refresh_in_progress) {
+        CtrlC_refresh_terminate = true;
+        return true;
+    }
+    return false;
 }
