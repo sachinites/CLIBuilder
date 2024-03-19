@@ -324,7 +324,6 @@ cli_screen_cursor_move_cursor_left (int cols, bool remove_char) {
 void 
 cli_screen_cursor_move_cursor_right (int cols) {
 
-    int i;
     int row, col;
     getyx(stdscr, row, col);
     move (row, col + cols);
@@ -691,9 +690,9 @@ cli_process_key_interrupt(int ch)
                     value of a leaf in cli*/
                    if (cli_cursor_is_at_end_of_line(default_cli)) {
                     #if 0
-                        cli_append_char (default_cli, ch, true);
+                        cli_append_char (default_cli, KEY_ASCII_SPACE, true);
                     #else
-                        default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                        default_cli->clibuff[default_cli->current_pos++] = (char)KEY_ASCII_SPACE;
                         default_cli->end_pos++;
                         default_cli->cnt++;
                         printw(" ");
@@ -701,7 +700,7 @@ cli_process_key_interrupt(int ch)
                    }
                    else {
                         cli_content_shift_right(default_cli);
-                        default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                        default_cli->clibuff[default_cli->current_pos++] = (char)KEY_ASCII_SPACE;
                         cli_screen_cursor_save_screen_pos(default_cli);
                         for (i = default_cli->current_pos - 1; i < default_cli->end_pos; i++) {
                             printw("%c", default_cli->clibuff[i]);
@@ -713,9 +712,9 @@ cli_process_key_interrupt(int ch)
                 /* print the blank character, take care that we might be typing not in the end*/
                     if (cli_cursor_is_at_end_of_line(default_cli)) {
                     #if 0
-                        cli_append_char (default_cli, ch, true);
+                        cli_append_char (default_cli, KEY_ASCII_SPACE, true);
                     #else 
-                        default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                        default_cli->clibuff[default_cli->current_pos++] = (char)KEY_ASCII_SPACE;
                         default_cli->end_pos++;
                         default_cli->cnt++;
                         printw(" ");
@@ -723,7 +722,7 @@ cli_process_key_interrupt(int ch)
                    }
                    else {
                         cli_content_shift_right(default_cli);
-                        default_cli->clibuff[default_cli->current_pos++] = (char)ch;
+                        default_cli->clibuff[default_cli->current_pos++] = (char)KEY_ASCII_SPACE;
                         cli_screen_cursor_save_screen_pos(default_cli);
                         for (i = default_cli->current_pos - 1; i < default_cli->end_pos; i++) {
                             printw("%c", default_cli->clibuff[i]);
