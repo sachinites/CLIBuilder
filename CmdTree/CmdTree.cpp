@@ -11,6 +11,11 @@
 #include "clistd.h"
 #include "../cmdtlv.h"
 
+extern int
+ut_test_handler (int cmdcode,
+                            Stack_t *tlv_stack,
+                            op_mode enable_or_disable) ;
+
 /*Default zero level commands hooks. */
 static param_t root;
 static param_t show;
@@ -18,6 +23,22 @@ static param_t debug;
 static param_t config;
 static param_t clearp;
 static param_t run;
+
+/* Working with Filters */
+static param_t pipe;
+static param_t count;
+static param_t save;
+static param_t save_file;
+static param_t include;
+static param_t include_leaf;
+static param_t exclude;
+static param_t exclude_leaf;
+static param_t grepx;
+static param_t grepx_leaf;
+static param_t refreshx;
+static param_t refresh_val;
+static param_t clrscr;
+
 
 static param_t *universal_params[] = {&show, &config};
 
@@ -37,8 +58,14 @@ libcli_register_param(param_t *parent, param_t *child);
 void 
 libcli_set_param_cmd_code(param_t *param, int cmd_code) ;
 
+void 
+libcli_register_cmd_handler(param_t *param,  cmd_callback callback) ;
+
 void
 libcli_support_cmd_negation (param_t *param);
+
+void 
+libcli_set_tail_config_one_shot (param_t *param);
 
 void
 init_param(param_t *param,    
@@ -77,20 +104,20 @@ init_param(param_t *param,
         GET_PARAM_CMD(param)->len = strlen (GET_CMD_NAME(param));
     }
 
-    param->callback = callback;
-
+    param->callback[0] = callback;
+    for (i = 1; i < CALLBACKS_N; i++)  param->callback[i] = NULL;
+    
     strncpy(GET_PARAM_HELP_STRING(param), help, MIN(PARAM_HELP_STRING_SIZE, strlen(help)));
     GET_PARAM_HELP_STRING(param)[PARAM_HELP_STRING_SIZE - 1] = '\0';
     param->disp_callback = NULL;
 
-    for (; i < MAX_OPTION_SIZE; i++) {   
+    for (i = 0; i < MAX_OPTION_SIZE; i++) {   
         param->options[i] = NULL;
     }
 
     param->CMDCODE = -1;
     init_glthread (&param->glue);
 }
-
 
 void 
 libcli_register_param(param_t *parent, param_t *child) {
@@ -99,10 +126,18 @@ libcli_register_param(param_t *parent, param_t *child) {
 
     if (!parent) parent = libcli_get_root_hook();
 
+    /* You cannot add a LEAF param as child of Recursive param because Recursive
+        param itself is its own child, Wierd but true*/
+    if ( (parent != child) && 
+            parent->flags & PARAM_F_RECURSIVE) {
+        assert (!IS_PARAM_LEAF (child));
+    }
+
     for (i = CHILDREN_START_INDEX; i <= CHILDREN_END_INDEX; i++) {
         if (parent->options[i])
             continue;
         parent->options[i] = child;
+        child->parent = parent;
         return;
     }   
     assert(0);
@@ -114,6 +149,58 @@ libcli_set_param_cmd_code(param_t *param, int cmd_code) {
     if (param->callback == NULL)
         assert(0);
     param->CMDCODE = cmd_code;
+}
+
+void 
+libcli_register_cmd_handler(param_t *param,  cmd_callback callback) {
+
+    int i;
+
+    for (i = 0; i < CALLBACKS_N; i++) {
+            if (param->callback[i]) continue;
+            param->callback[i] = callback;
+            return;
+    }
+    /* Cant register more backend handlers. If required, pls increase CALLBACKS_N limit */
+    assert(0);
+}
+
+void 
+libcli_param_recursive (param_t *param) {
+
+    assert (IS_PARAM_LEAF (param));
+    param_t *parent = param->parent;
+    libcli_register_param (param, param);
+    param->parent = parent;
+    param->flags |= PARAM_F_RECURSIVE;
+}
+
+void 
+libcli_set_tail_config_batch_processing (param_t *param) {
+
+    param_t *origp = param;
+
+    while ( param != libcli_get_config_hook () ) {
+
+            if (param->flags & PARAM_F_CONFIG_BATCH_CMD) break;
+            
+            if (param->callback ) {
+                param->flags |= PARAM_F_CONFIG_BATCH_CMD;
+            }
+            
+            param = param->parent;
+    }
+
+    /* This is required while copy-pasting the param sub-trees across branches in
+        config tree*/
+    if (!origp->callback) {
+        param->flags &= ~PARAM_F_CONFIG_BATCH_CMD;
+    }
+}
+
+void 
+libcli_set_inbuilt_param (param_t *param) {
+    param->flags |= PARAM_F_INBUILD_CMD;
 }
 
 static void 
@@ -167,6 +254,7 @@ static void
         init_param (&help, CMD, "help", show_help_handler, NULL, INVALID, NULL, "KYC (Know Your CLI)");
         libcli_register_param(hook, &help);
         libcli_set_param_cmd_code(&help, SHOW_CLI_HELP);
+        libcli_set_inbuilt_param  (&help);
     }
     {
         /*show history*/
@@ -174,6 +262,51 @@ static void
         init_param (&history, CMD, "history", show_history_handler, NULL, INVALID, NULL, "CLI history");
         libcli_register_param(hook, &history);
         libcli_set_param_cmd_code(&history, SHOW_CLI_HISTORY);        
+        libcli_set_inbuilt_param  (&history);
+    }
+
+    hook = libcli_get_run_hook();
+
+    {   
+        /* run ut <file path> <tc no> */
+        static param_t ut; 
+        init_param(&ut, CMD, "ut", 0, 0, INVALID, 0, "Unit Test");
+        libcli_register_param(hook, &ut);
+        {   
+            static param_t ut_file_path;
+            init_param(&ut_file_path, LEAF, 0, 0, 0, STRING, "ut-file-name", "UT file name");
+            libcli_register_param(&ut, &ut_file_path);
+            {   
+                static param_t tc_no;
+                init_param(&tc_no, LEAF, 0, ut_test_handler, 0, INT, "tc-no", "Test Case Number");
+                libcli_register_param(&ut_file_path, &tc_no);
+                libcli_set_param_cmd_code(&tc_no, CMDCODE_RUN_UT_TC);
+                libcli_set_inbuilt_param(&tc_no);
+            }   
+        }   
+    }
+
+    {
+        /* run terminate*/
+        static param_t terminate;
+        init_param(&terminate, CMD, "term", cli_terminate_handler, 0, INVALID, 0, "Terminate appln");
+        libcli_register_param(&run, &terminate);
+        libcli_set_inbuilt_param(&terminate);
+    }
+
+    hook = libcli_get_debug_hook();
+
+    {
+        static param_t ut;
+        init_param(&ut, CMD, "ut", 0, 0, INVALID, 0, "debug ut");
+        libcli_register_param(&debug, &ut);
+        {
+            static param_t enable;
+            init_param(&enable, LEAF, 0, ut_test_handler, NULL,  STRING, "ut-enable", "enable | disable");
+            libcli_register_param(&ut, &enable);
+            libcli_set_param_cmd_code(&enable, CMDCODE_DEBUG_UT);
+            libcli_set_inbuilt_param(&enable);
+        }
     }
  }
 
@@ -216,46 +349,59 @@ libcli_get_run_hook(void)
     return &run;
 }
 
-bool
-cmd_tree_leaf_char_save (param_t *leaf_param, unsigned char c, int index) {
+param_t *
+libcli_get_refresh_hook(void)
+{
+    return &refreshx;
+}
 
-    assert (IS_PARAM_LEAF (leaf_param));
+param_t *
+libcli_get_refresh_val_hook(void)
+{
+    return &refresh_val;
+}
+
+param_t *
+libcli_get_clrscr_hook(void)
+{
+    return &clrscr;
+}
+
+bool
+cmd_tree_leaf_char_save (unsigned char *curr_leaf_value, unsigned char c, int index) {
+
     if (index == LEAF_VALUE_HOLDER_SIZE) return false;
-    GET_LEAF_VALUE_PTR(leaf_param)[index] = c;
+    curr_leaf_value[index] = c;
     return true;
 }
 
-void 
-cmd_tree_collect_param_tlv (param_t *param, ser_buff_t *ser_buff) {
+tlv_struct_t *
+cmd_tree_convert_param_to_tlv (param_t *param, unsigned char *curr_leaf_value) {
 
-     tlv_struct_t tlv;
-
-     memset(&tlv, 0, sizeof(tlv_struct_t));
+     tlv_struct_t *tlv = (tlv_struct_t *)calloc (1, sizeof (tlv_struct_t));
 
     if (IS_PARAM_CMD (param)) {
         
-        tlv.tlv_type = TLV_TYPE_CMD_NAME;
-        tlv.leaf_type = STRING;
-        put_value_in_tlv((&tlv), GET_CMD_NAME(param));
-        collect_tlv(ser_buff, &tlv);
+        tlv->tlv_type = TLV_TYPE_CMD_NAME;
+        tlv->leaf_type = STRING;
+        put_value_in_tlv((tlv), GET_CMD_NAME(param));
     }
     else if (IS_PARAM_NO_CMD (param)) {
         
-        tlv.tlv_type = TLV_TYPE_NEGATE;
-        tlv.leaf_type = STRING;
-        put_value_in_tlv((&tlv), GET_CMD_NAME(param));
-        collect_tlv(ser_buff, &tlv);
+        tlv->tlv_type = TLV_TYPE_NEGATE;
+        tlv->leaf_type = STRING;
+        put_value_in_tlv((tlv), GET_CMD_NAME(param));
     }
     else {
         
-        tlv.tlv_type = TLV_TYPE_NORMAL;
-        prepare_tlv_from_leaf(GET_PARAM_LEAF(param), (&tlv));
-        put_value_in_tlv((&tlv), GET_LEAF_VALUE_PTR(param));
-        collect_tlv(ser_buff, &tlv);
+        tlv->tlv_type = TLV_TYPE_NORMAL;
+        prepare_tlv_from_leaf(GET_PARAM_LEAF(param), (tlv));
+        put_value_in_tlv((tlv), (const char *)curr_leaf_value);
     }
+    return tlv;
 }
 
-static unsigned char temp[ LEAF_ID_SIZE + 2];
+static unsigned char temp[ LEAF_ID_SIZE + 2]; // 2 for < > 
 void
 cmd_tree_display_all_complete_commands(
                 param_t *root, unsigned int index) {
@@ -264,7 +410,6 @@ cmd_tree_display_all_complete_commands(
             return;
 
         if (root->flags & PARAM_F_NO_EXPAND) return;
-        if (IS_PARAM_NO_CMD(root)) return;
         
         if (IS_PARAM_CMD(root)){
             untokenize(index);
@@ -280,9 +425,11 @@ cmd_tree_display_all_complete_commands(
 
         unsigned int i = CHILDREN_START_INDEX;
 
-        for ( ; i <= CHILDREN_END_INDEX; i++)
+        for ( ; i <= CHILDREN_END_INDEX; i++) {
+            if (root->options[i] && (root->options[i]->flags & PARAM_F_RECURSIVE)) continue;
             cmd_tree_display_all_complete_commands(
                     root->options[i], index+1);
+        }
     
         if (root->callback){
             print_tokens(index + 1); 
@@ -298,7 +445,9 @@ cmd_tree_install_universal_params (param_t *param, param_t *branch_hook) {
     
     while (true) {
 
-        if (i > CHILDREN_END_INDEX) return;
+        /* If it assers here, it means you have run out of space, consider increase
+            the value of MAX_OPTION_SIZE */
+        if (i > CHILDREN_END_INDEX) assert(0);
 
         if (param->options[i]) {
             i++;
@@ -441,7 +590,7 @@ libcli_support_cmd_negation (param_t *param) {
     }
 
     negate_param = (param_t *)calloc (1, sizeof (param_t));
-    init_param (negate_param , NO_CMD, "no", NULL, NULL, INVALID, NULL, "Cmd Negation");
+    init_param (negate_param , NO_CMD, NEGATE_CHARACTER, NULL, NULL, INVALID, NULL, "Cmd Negation");
 
     for (i = CHILDREN_START_INDEX; i <= CHILDREN_END_INDEX; i++) {
 
@@ -454,21 +603,52 @@ libcli_support_cmd_negation (param_t *param) {
 
     assert(i <= CHILDREN_END_INDEX);
     param->options[i] = negate_param;
+    negate_param->flags = PARAM_F_NO_EXPAND;
 }
 
-/* Working with Filters */
+static void 
+libcli_cleanup_parent_pointers_internal (param_t *param) {
 
-static param_t pipe;
-static param_t include_leaf;
-static param_t exclude;
-static param_t exclude_leaf;
+    int i;
+
+    if (!param) return;
+    if (param == &pipe) return;
+
+    for (i = CHILDREN_START_INDEX ; i <= CHILDREN_END_INDEX; i++) {
+        if (param->options[i] && (param->options[i]->flags & PARAM_F_RECURSIVE)) continue;
+        libcli_cleanup_parent_pointers_internal (param->options[i]);
+    }
+
+    /* In our library design, param->parent is suppose to be null during normal
+        opn*/
+    param->parent = NULL;
+}
+
+static void 
+libcli_cleanup_parent_pointers () {
+
+    libcli_cleanup_parent_pointers_internal (libcli_get_root_hook());
+}
 
 static void
 cmd_tree_construct_filter_subtree () {
 
     init_param (&pipe, CMD, "|", NULL, NULL, INVALID, NULL, "pipe");
+    pipe.flags |= (PARAM_F_NO_EXPAND );
+    init_param (&count, CMD, "count", NULL, NULL, INVALID, NULL, "count lines");
+    init_param (&save, CMD, "save", NULL, NULL, INVALID, NULL, "save to a file");
+    init_param (&save_file, LEAF, NULL, NULL, NULL, STRING, "sfile-name", "file name");
+
     {
-        static param_t include;
+        libcli_register_param (&save, &save_file);
+    }
+    {
+        libcli_register_param (&pipe, &count);
+    }
+    {
+        libcli_register_param (&pipe, &save);
+    }
+    {
         init_param (&include,  CMD, "include", NULL, NULL, INVALID, NULL, "Include Pattern");
         libcli_register_param (&pipe, &include);
         {
@@ -478,7 +658,6 @@ cmd_tree_construct_filter_subtree () {
         }
     }
     {
-        static param_t exclude;
         init_param (&exclude,  CMD, "exclude", NULL, NULL, INVALID, NULL, "Exclude Pattern");
         libcli_register_param (&pipe, &exclude);
         {
@@ -486,17 +665,61 @@ cmd_tree_construct_filter_subtree () {
             libcli_register_param (&exclude, &exclude_leaf);
             libcli_register_param (&exclude_leaf, &pipe);
         }
-    }    
+    }
+    {
+        init_param(&grepx, CMD, "grep", NULL, NULL, INVALID, NULL, "grep RegEx Pattern");
+        libcli_register_param(&pipe, &grepx);
+        {
+            init_param(&grepx_leaf, LEAF, NULL, NULL, NULL, STRING, "grep-pattern", "Grep Pattern");
+            libcli_register_param(&grepx, &grepx_leaf);
+            libcli_register_param(&grepx_leaf, &pipe);
+        }
+    }
+    {
+        init_param (&refreshx, CMD, "refresh", NULL, NULL, INVALID, NULL, "Refresh the command repeatedly");
+        init_param (&refresh_val, LEAF, NULL, NULL, NULL, INT, "refresh-val", "Refresh Time Interval in Sec");
+        libcli_register_param (&refreshx, &refresh_val);
+        libcli_register_param (&pipe, &refreshx);
+        libcli_register_param (&refresh_val, &pipe);
+        {
+             init_param (&clrscr, CMD, "cls", NULL, NULL, INVALID, NULL, "Clear the screen");
+             libcli_register_param (&refresh_val, &clrscr);
+        }
+    }
 }
 
+static void 
+libcli_augment_cmd_tree_with_filters (param_t *param) {
+
+    int i;
+    if (!param) return;
+    if (param->flags & PARAM_F_NO_EXPAND) return;
+    if (param == &pipe) return;
+
+    for (i = CHILDREN_START_INDEX ; i <= CHILDREN_END_INDEX; i++) {
+        libcli_augment_cmd_tree_with_filters (param->options[i]);
+    }
+
+    if (param->callback) {
+        libcli_register_param (param, &pipe);
+    }
+}
 
 static void 
  libcli_augment_show_cmds () {
 
-   // libcli_register_param (&show, &pipe);
+    param_t *show_param = libcli_get_show_hook();
+    libcli_augment_cmd_tree_with_filters (show_param);
  }
 
- void 
+ static void 
+ libcli_augment_debug_cmds () {
+
+    param_t *debug_param = libcli_get_debug_hook();
+    libcli_augment_cmd_tree_with_filters (debug_param);
+ }
+
+void
 cmd_tree_init () {
 
     init_token_array();
@@ -507,7 +730,47 @@ cmd_tree_init () {
 void 
 libcli_init_done () {
 
-    libcli_support_cmd_negation (libcli_get_config_hook());
     cmd_tree_construct_filter_subtree();
     libcli_augment_show_cmds ();
+    libcli_augment_debug_cmds ();
+    libcli_support_cmd_negation (libcli_get_config_hook());
+    libcli_cleanup_parent_pointers ();
+}
+
+bool 
+cmd_tree_is_param_pipe (param_t *param) {
+
+    return param == &pipe;
+}
+
+bool 
+cmd_tree_is_filter_param (param_t *param) {
+
+    return (param == &pipe || param == &count || param == &save ||
+                param == &save_file || param == &include || 
+                param == &include_leaf || param == &exclude ||
+                param == &exclude_leaf ||
+                param == &grepx || param == &grepx_leaf);
+}
+
+void 
+cmd_tree_param_invoke_direct (param_t *param) {
+
+    param->flags |= PARAM_F_INVOKE_DIRECT;
+}
+
+void 
+libcli_register_display_callback (param_t *param, display_possible_values_callback cbk) {
+
+    param->disp_callback = cbk;
+}
+
+void 
+libcli_param_match_regex (param_t *param, char *reg_ex) {
+
+    assert (!cmd_tree_is_filter_param(param));
+    assert (IS_PARAM_LEAF (param));
+    assert (!(param->flags & PARAM_F_REG_EX_MATCH));
+    param->flags |= PARAM_F_REG_EX_MATCH;
+    strncpy (param->cmd_type.leaf->reg_ex, reg_ex, LEAF_REG_EX_MAX_LEN);
 }

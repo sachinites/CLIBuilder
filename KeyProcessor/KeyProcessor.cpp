@@ -1,3 +1,24 @@
+/*
+ * =====================================================================================
+ *
+ *       Filename:  CmTreeCursor.cpp
+ *
+ *    Description:  This file Implements KeyProcessor Module
+ *
+ *        Version:  1.0
+ *        Created:  Thursday 09 July 2023 05:37:07  IST
+ *       Revision:  1.0
+ *       Compiler:  gcc/g++
+ *
+ *         Author:  Er. Abhishek Sagar, Networking Developer (AS), sachinites@gmail.com
+ *        Company:  Brocade Communications(2012-2017)
+ *                           Juniper Networks(2017-2021)
+ *                           Cisco Systems(2021-2023)
+ *                           CALIX(2023-Present)
+ *
+ * =====================================================================================
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -5,8 +26,10 @@
 #include <ncurses.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <signal.h>
 #include "../stack/stack.h"
 #include "../cli_const.h"
+#include "cmdtlv.h"
 #include "KeyProcessor.h"
 #include "CmdTree/CmdTree.h"
 #include "CmdTree/CmdTreeCursor.h"
@@ -89,6 +112,7 @@ key_processor_should_enter_line_mode (int key) {
     return false;
 }
 
+/* Return 0 on success */
 static int
 cli_submit (cli_t *cli) {
 
@@ -99,20 +123,13 @@ cli_submit (cli_t *cli) {
 
     if (cli_is_char_mode_on ()) {
 
-        cmd_tree_process_carriage_return_key(cli->cmdtc);
-        /* Record the cmd only if the application returned success*/
-        if (1 || cmdtc_get_cmd_trigger_status (cli->cmdtc)) ret = 0;
+        parse_rc = cmd_tree_process_carriage_return_key(cli->cmdtc);
+        if (parse_rc) ret = 0;
     }
     else {
-        /* If the historical cmd is modified, then current pos may be diff from end pos, sync it*/
         cli->current_pos = cli->end_pos;
-         parse_rc = cmdtc_parse_full_command(cli);
-         if (parse_rc &&         /* if the cmd syntactically has been parsed successfully in line mode*/
-            !cli_is_historical (cli) &&  /* if it is not a historical cmd*/
-            (1 || cmdtc_get_cmd_trigger_status (cli->cmdtc))) { /* If the application returned success*/
-        
-            ret = 0;
-        }
+         cmdtc_parse_full_command(cli);
+         ret = 0;
     }
 
     return ret;
@@ -127,30 +144,6 @@ cli_is_same (cli_t *cli1, cli_t *cli2) {
     return false;
 }
 
-static cli_t *cli_clone (cli_t *cli) {
-
-    param_t *param;
-    int top = 1, rc = 0;
-    Stack_t *stack;
-    cli_t *new_cli = (cli_t *)calloc (1, sizeof (cli_t));
-    rc = strlen (DEF_CLI_HDR);
-    cli_set_hdr (new_cli, (unsigned char *)DEF_CLI_HDR, rc);
-    new_cli->cmdtc = NULL;
-    stack = cmdtc_get_stack(cli->cmdtc);
-    int topx = stack->top + 1;
-    while (top != topx) {
-        param = (param_t *)stack->slot[top];
-        rc += sprintf ((char *)new_cli->clibuff + rc , "%s ", 
-            (IS_PARAM_CMD(param) || IS_PARAM_NO_CMD(param)) ? GET_CMD_NAME(param) :
-            GET_LEAF_VALUE_PTR(param));
-        top++;
-    }
-    new_cli->cnt = rc;
-    new_cli->current_pos = new_cli->cnt;
-    new_cli->end_pos =  new_cli->cnt;
-    return new_cli;
-}   
-
 bool 
 cli_is_historical (cli_t *cli) {
     
@@ -164,17 +157,48 @@ cli_get_cmd_tree_cursor (cli_t *cli)  {
 }
 
 void 
-cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
+cli_set_cmd_tree_cursor (cli_t *cli, cmd_tree_cursor_t *cmdtc)  {
+
+    assert (!cli->cmdtc);
+    cli->cmdtc = cmdtc;
+}
+
+static const char *exceptional_cmds [] = { 
+                                    "show history\0",
+                                    "show help\0",
+                                    NULL};
+
+void 
+cli_record_cli_history (cli_history_t *cli_history, cli_t *new_cli) {
 
     if (cli_is_buffer_empty (new_cli)) return;
     if (default_cli_history_list->curr_ptr == new_cli) return;
     
+    int i = 0, size;
+    while (exceptional_cmds[i]) {
 
-    cli_t *cli = cli_clone (new_cli);
-    if (cli_history->first == NULL) {
-        cli_history->first = cli;
-        cli_history->last = cli;
+        if (strncmp ((const char *)cli_get_user_command(new_cli, &size),
+                             exceptional_cmds[i],
+                             strlen (exceptional_cmds[i]))) {
+            i++;
+            continue;
+        }
+        
+        free(new_cli);
+        return;
+    }
+
+    cli_t *first_cli = cli_history->first;
+
+    if (!first_cli) {
+        cli_history->first = new_cli;
+        cli_history->last = new_cli;
         cli_history->count++;
+        return;
+    }
+
+    if (cli_is_same (new_cli, first_cli)) {
+        free(new_cli);
         return;
     }
 
@@ -183,19 +207,55 @@ cli_record_copy (cli_history_t *cli_history, cli_t *new_cli) {
         cli_t *new_last = cli_history->last->prev;
         free(new_last->next);
         new_last->next = NULL;
+        cli_history->last = new_last;
     }
 
-    cli_t *first_cli = cli_history->first;
+    new_cli->next = first_cli;
+    first_cli->prev = new_cli;
+    cli_history->first = new_cli;
+    cli_history->count++;
+}
 
-    if (cli_is_same (cli, first_cli)) {
-        free(cli);
+cli_t *
+cli_malloc () {
+
+    return (cli_t *)calloc (1, sizeof (cli_t));
+}
+
+extern void ut_parser_init ( ) ;
+
+/* Fn ptr to store the application specific ctrl C handler*/
+static void (*app_ctrlC_signal_handler)(void) = NULL;
+
+/* Public API to allow application to register ctrlC handler*/
+void
+cli_register_ctrlC_handler(void (*fn_ptr)(void))
+{
+    app_ctrlC_signal_handler = fn_ptr;
+}
+
+extern int cprintf (const char* format, ...) ;
+extern bool libcli_terminate_refresh ();
+extern void init_filters () ;
+
+static void
+ctrlC_signal_handler(int sig)
+{
+    cprintf("Ctrl-C pressed\n");
+
+    if (libcli_terminate_refresh ()) {
         return;
     }
 
-    cli->next = first_cli;
-    first_cli->prev = cli;
-    cli_history->first = cli;
-    cli_history->count++;
+    if (app_ctrlC_signal_handler)
+    {   
+        app_ctrlC_signal_handler();
+    }   
+    else
+    {   
+        cprintf("Bye Bye\n");
+        exit(0);
+    }   
 }
 
 void
@@ -214,7 +274,7 @@ libcli_init () {
     cbreak();         // Disable line buffering
     noecho();        // Disable character echoing
     refresh();        // Update the screen
-    
+
     assert (has_colors() );
     start_color();
     init_pair(GRASS_PAIR, COLOR_YELLOW, COLOR_GREEN);
@@ -223,6 +283,10 @@ libcli_init () {
     init_pair(PLAYER_PAIR, COLOR_RED, COLOR_MAGENTA);
     init_pair(RED_ON_BLACK, COLOR_RED, COLOR_BLACK);
     init_pair(GREEN_ON_BLACK, COLOR_GREEN, COLOR_BLACK);
+
+    ut_parser_init ( ) ;
+    signal(SIGINT, ctrlC_signal_handler);
+    init_filters () ;
 }
 
 void
@@ -264,15 +328,25 @@ cli_get_user_command (cli_t *cli, int *size) {
     return cmd;
 }
 
-cmd_tree_cursor_t * 
-cli_get_cmdtc (cli_t *cli) {
+int
+cli_append_user_command (cli_t *cli, unsigned char *cmd, int size) {
 
-    return cli->cmdtc;
+    unsigned char *cmd1 = &cli->clibuff[cli->end_pos];
+    memcpy (cmd1, cmd, size);
+    cli->cnt += size;
+    cli->end_pos += size;
+    cli->current_pos = cli->end_pos;
+    return cli->cnt;
 }
 
 void cli_printsc (cli_t *cli, bool next_line) {
 
+    #if 0
+    /* It dont scroll the screen up*/
     if (next_line) cli_screen_cursor_move_next_line ();
+    #else
+    if (next_line) printw("\n");
+    #endif
     printw("%s", cli->clibuff);
 }
 
@@ -521,6 +595,16 @@ cli_process_key_interrupt(int ch)
 
             /* in Char mode we are always at the end of line*/
             assert(cli_cursor_is_at_end_of_line (default_cli));
+
+            if (cmd_tree_cursor_move_one_char_back (default_cli->cmdtc)) {
+
+                cli_screen_cursor_move_cursor_left (1, true);
+                default_cli->clibuff[--default_cli->end_pos] = '\0';
+                default_cli->cnt--;
+                default_cli->current_pos--;
+                break;
+            }
+
             bs_count = cmd_tree_cursor_move_one_level_up (default_cli->cmdtc, true, false);
             if (bs_count) {
                 cli_screen_cursor_move_cursor_left (bs_count, true);
@@ -738,13 +822,13 @@ cli_process_key_interrupt(int ch)
     /* Put all the probable fall-through to default cases here*/
     case SUBOPTIONS_CHARACTER:
             if (cli_is_char_mode_on() &&
-                    cli_is_prev_char (default_cli, ' ')) {
+                 cli_is_prev_char (default_cli, ' ')) {
                 cmdtc_process_question_mark (default_cli->cmdtc);
                 break;
             }
     case MODE_CHARACTER:
             if (cli_is_char_mode_on() &&
-                     cli_is_prev_char (default_cli, ' ')) {
+                cli_is_prev_char (default_cli, ' ')) {
                 cmd_tree_enter_mode (default_cli->cmdtc);
                 break;
             }
@@ -821,13 +905,16 @@ cli_start_shell () {
 
         if (cli_is_char_mode_on()) {
 
-            if (key_processor_should_enter_line_mode (ch)) {
+
+
+            if ( key_processor_should_enter_line_mode (ch)) {
                 keyp_char_mode = false;
                 /* Reset the cmd tree cbc cursor to be used for next command now afresh*/
                 cmd_tree_cursor_reset_for_nxt_cmd (default_cli->cmdtc);
                 MODE_MSG_DISPLAY;
             }
         }
+
         cli_process_key_interrupt ((int)ch);
     }
 }
@@ -875,5 +962,5 @@ cli_history_show () {
         printw ("\n%s", cli->clibuff);
         cli = cli->next;
     }
-    cli_printsc (default_cli, true);
 }
+

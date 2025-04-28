@@ -7,21 +7,23 @@
 
 #define DEF_CLI_HDR  "Soft-Firewall>$ "
 #define CMD_NAME_SIZE   32
-#define LEAF_VALUE_HOLDER_SIZE 32
+#define LEAF_VALUE_HOLDER_SIZE 64
 #define LEAF_ID_SIZE    32
 #define PARAM_HELP_STRING_SIZE 64
-#define MAX_OPTION_SIZE 16
-#define MAX_CMD_TREE_DEPTH 16
+#define MAX_OPTION_SIZE 20
+#define CALLBACKS_N 3
+#define MAX_CMD_TREE_DEPTH 24
 #define CHILDREN_START_INDEX    0
 #define CHILDREN_END_INDEX      (MAX_OPTION_SIZE -1)
 #define TLV_MAX_BUFFER_SIZE     1024
 #define POSSIBILITY_ARRAY_SIZE  10
 #define CLI_HDR_MAX_SIZE    32
-
+#define LEAF_REG_EX_MAX_LEN 32
 #define KEY_BACKSPACE_MOBAXTERM 8 /* I found, in MobaXterm on Windows, BS has ascii of 8*/
 #define KEY_ASCII_TAB   9
 #define KEY_ASCII_NEWLINE 10
 #define KEY_ASCII_SPACE   32
+#define KEY_ASCII_DOUBLE_QUOTES 34
 
 #define CLI_HISTORY_LIMIT   50
 
